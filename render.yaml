@@ -1,0 +1,27 @@
+# Render Blueprint: one free web service (API + PWA in one container).
+# Database: Neon free Postgres (Render's free Postgres expires after 30 days).
+services:
+  - type: web
+    name: frozen-shake
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL # Neon *direct* connection string, ?sslmode=require
+        sync: false
+      - key: APP_URL # e.g. https://frozen-shake.onrender.com
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SMTP_HOST # optional; Render free blocks ports 25/465/587, use 2525
+        sync: false
+      - key: SMTP_PORT
+        value: "2525"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false

@@ -1,0 +1,23 @@
+# Production override: adds Caddy for HTTPS on ports 80/443.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Set WEB_PORT=127.0.0.1:8080 in .env so nginx is only reachable through Caddy.
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

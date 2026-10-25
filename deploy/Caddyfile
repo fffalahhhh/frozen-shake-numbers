@@ -1,0 +1,6 @@
+# Caddy terminates HTTPS (free Let's Encrypt certificate, auto-renewed)
+# and forwards everything to the nginx "web" container.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}

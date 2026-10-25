@@ -1,0 +1,22 @@
+# Nightly database backup, stored as a workflow artifact for 30 days.
+# Needs repository secret DATABASE_URL (the Neon connection string).
+# Keep the repository private: the artifact contains all shop data.
+name: Backup database
+on:
+  schedule:
+    - cron: "30 21 * * *" # 03:00 IST
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    container: postgres:18 # newer pg_dump can dump older servers
+    steps:
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pg_dump "$DATABASE_URL" --no-owner --no-privileges | gzip > backup.sql.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frozen-shake-${{ github.run_number }}
+          path: backup.sql.gz
+          retention-days: 30
