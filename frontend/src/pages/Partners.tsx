@@ -3,10 +3,9 @@ import { Forward, Users } from 'lucide-react'
 import { useFetch, type Handover, type Partner, type Shop } from '../api'
 import { useSession } from '../session'
 import { applyOps, overlayOps, useSync } from '../sync'
-import { addDays, fmtDate, inr, monthBounds, toPaise, todayIn } from '../lib'
-import { Empty, PageHead, Skeleton } from '../ui'
+import { addDays, fmtDate, inr, monthBounds, newestFirst, toPaise, todayIn } from '../lib'
+import { DateField, Empty, PageHead, Skeleton, Status } from '../ui'
 import { TxnSheet } from '../sheets'
-import { Status } from './Today'
 
 type Preset = 'all' | 'month' | '30d' | 'custom'
 
@@ -31,7 +30,7 @@ export default function Partners() {
   const partners = (parts.data?.partners ?? []).filter((p) => p.active || p.handoverCount > 0)
   const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt),
     (h) => (!from || h.date >= from) && (!to || h.date <= to) && (!selected || h.partnerId === selected))
-    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+    .sort(newestFirst)
   const selectedName = partners.find((p) => p.id === selected)?.name
 
   return (
@@ -47,9 +46,9 @@ export default function Partners() {
         ))}
       </div>
       {preset === 'custom' && (
-        <div className="rangeRow" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          <label className="field"><span>From</span><input type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && setRange({ ...range, from: e.target.value })} /></label>
-          <label className="field"><span>To</span><input type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} /></label>
+        <div className="rangeRow">
+          <label className="field"><span>From</span><DateField value={range.from} max={range.to} onChange={(d) => setRange({ ...range, from: d })} label="From" /></label>
+          <label className="field"><span>To</span><DateField value={range.to} min={range.from} max={today} onChange={(d) => setRange({ ...range, to: d })} label="To" /></label>
         </div>
       )}
 

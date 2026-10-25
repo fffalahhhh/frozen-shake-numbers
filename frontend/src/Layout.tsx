@@ -7,7 +7,7 @@ import { fmtDate, inr, toPaise } from './lib'
 import { Sheet } from './ui'
 
 const NAV = [
-  { to: '/', label: 'Today', icon: House },
+  { to: '/', label: 'Home', icon: House },
   { to: '/history', label: 'History', icon: Clock },
   { to: '/partners', label: 'Partners', icon: Users },
   { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
@@ -17,7 +17,7 @@ function Nav({ className }: { className: string }) {
   return (
     <nav className={className} aria-label="Main">
       {NAV.map(({ to, label, icon: Icon }) => (
-        <NavLink key={to} to={to} end className={({ isActive }) => 'navItem' + (isActive ? ' active' : '')}>
+        <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => 'navItem' + (isActive ? ' active' : '')}>
           <Icon size={22} strokeWidth={1.7} />
           {label}
         </NavLink>

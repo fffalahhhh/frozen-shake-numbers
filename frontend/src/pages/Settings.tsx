@@ -172,9 +172,9 @@ function ShopDetails({ shop }: { shop: Shop }) {
           </select>
           <p className="hint">“Today” and new records use this timezone’s date.</p>
         </label>
-        <label className="row" style={{ minHeight: 48, padding: 0, borderBottom: 0, gap: 10 }}>
-          <input type="checkbox" checked={shop.isDefault} onChange={(e) => setDefault(e.target.checked)} style={{ width: 20, height: 20 }} />
+        <label className="switchRow">
           <span className="rowCopy"><b>Default shop</b><small>Opens first when you sign in</small></span>
+          <input type="checkbox" role="switch" className="switch" checked={shop.isDefault} onChange={(e) => setDefault(e.target.checked)} />
         </label>
         {msg && <p className={msg.ok ? 'hint' : 'formError'}>{msg.ok && <Check size={14} />} {msg.text}</p>}
         {owner && (

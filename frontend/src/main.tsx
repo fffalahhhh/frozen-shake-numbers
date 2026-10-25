@@ -10,6 +10,7 @@ import { ConfirmProvider } from './ui'
 import Layout from './Layout'
 import Today from './pages/Today'
 import History from './pages/History'
+import Day from './pages/Day'
 import Partners from './pages/Partners'
 import Settings from './pages/Settings'
 import { CreateFirstShop, ForgotPassword, Login, Register, ResetPassword } from './pages/Auth'
@@ -48,6 +49,7 @@ function App() {
           <Route element={<Layout />}>
             <Route index element={<Today />} />
             <Route path="history" element={<History />} />
+            <Route path="history/:date" element={<Day />} />
             <Route path="partners" element={<Partners />} />
             <Route path="settings" element={<Settings />} />
           </Route>

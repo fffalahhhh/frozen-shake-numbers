@@ -122,6 +122,9 @@ func TestCashInHand(t *testing.T) {
 
 	// A later day that spends more than it earns: cash in hand carries over.
 	c.must(200, "PUT", base+"/revenue/2026-10-14", map[string]any{"amount": "1000"})
+	if rev := c.must(200, "GET", base+"/revenue?limit=1", nil)["revenue"].([]any); len(rev) != 1 || rev[0].(map[string]any)["date"] != "2026-10-14" {
+		t.Fatalf("limit=1 should return only the latest day, got %v", rev)
+	}
 	c.must(201, "POST", base+"/expenses", map[string]any{"date": "2026-10-14", "amount": "3000", "categoryId": cat})
 	// An earlier month, so October opens with a balance.
 	c.must(200, "PUT", base+"/revenue/2026-09-30", map[string]any{"amount": "100"})

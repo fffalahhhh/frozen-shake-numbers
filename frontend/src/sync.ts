@@ -157,6 +157,15 @@ export function applyOps<T extends { id: string; pending?: boolean; failed?: boo
   return [...byId.values()].filter(keep)
 }
 
+/** Apply pending revenue changes (one total per date) to a fetched list, newest date first. */
+export function applyRevenueOps<T extends { date: string; amount: string; pending?: boolean; failed?: boolean }>(items: T[], ops: Op[]): T[] {
+  const byDate = new Map(items.map((i) => [i.date, i]))
+  for (const op of ops) {
+    if (op.action === 'put') byDate.set(op.targetId, { ...byDate.get(op.targetId), date: op.targetId, amount: op.body!.amount, pending: !op.syncedAt, failed: !!op.error } as T)
+  }
+  return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date))
+}
+
 window.addEventListener('online', () => {
   emit({ online: true })
   void flush()

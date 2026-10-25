@@ -69,7 +69,7 @@ reset tokens are 256-bit random values, and only their SHA-256 hashes are stored
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/revenue?from=&to=` | `{revenue: [{date, amount, updatedAt}]}` |
+| `GET /shops/{shopId}/revenue?from=&to=&limit=` | `{revenue: [{date, amount, updatedAt}]}`, newest date first (`limit` for "recent") |
 | `PUT /shops/{shopId}/revenue/{date}` | `{amount}` → `{revenue: {date, amount, updatedAt}}` (upsert) |
 
 ## Expenses

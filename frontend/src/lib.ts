@@ -36,6 +36,11 @@ export function sum(items: { amount: string }[]): number {
   return items.reduce((t, i) => t + toPaise(i.amount), 0)
 }
 
+/** Sort by business date, then entry time, newest first. */
+export function newestFirst(a: { date: string; createdAt?: string }, b: { date: string; createdAt?: string }): number {
+  return b.date.localeCompare(a.date) || (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+}
+
 /** Today's calendar date in the given IANA timezone, e.g. Asia/Kolkata. */
 export function todayIn(tz: string, now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)

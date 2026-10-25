@@ -1,46 +1,49 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { CalendarDays, ChevronLeft, ChevronRight, ChevronRight as Open } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useFetch, type HistoryDay, type Shop } from '../api'
 import { useSession } from '../session'
 import { addMonths, fmtDate, inr, monthBounds, toPaise, todayIn } from '../lib'
-import { Empty, PageHead, Skeleton } from '../ui'
+import { DateField, Empty, PageHead, Skeleton } from '../ui'
+import { dayLabel } from './Today'
 
 type Totals = { revenue: string; expenses: string; handovers: string; net: string; openingBalance: string; closingBalance: string }
+type Mode = 'all' | 'month' | 'range'
 
 export default function History() {
   const shop = useSession().shop as Shop
   const navigate = useNavigate()
   const today = todayIn(shop.timezone)
-  const [month, setMonth] = useState(() => monthBounds(today)[0])
-  const [custom, setCustom] = useState<{ from: string; to: string } | null>(null)
-  const [draft, setDraft] = useState({ from: monthBounds(today)[0], to: today })
+  const thisMonth = monthBounds(today)[0]
+  const [mode, setMode] = useState<Mode>('all')
+  const [month, setMonth] = useState(thisMonth)
+  const [range, setRange] = useState({ from: thisMonth, to: today })
 
-  const [from, to] = custom ? [custom.from, custom.to] : monthBounds(month)
+  const [from, to] = mode === 'all' ? ['2000-01-01', today] : mode === 'month' ? monthBounds(month) : [range.from, range.to]
   const { data, loading, error, reload } = useFetch<{ days: HistoryDay[]; totals: Totals }>(`/shops/${shop.id}/history?from=${from}&to=${to}`)
   const days = data?.days ?? []
-  const thisMonth = monthBounds(today)[0]
 
   return (
     <>
-      <PageHead eyebrow="Your records" title="History" sub="Review a day and open it to make changes. In hand is the running cash balance at the end of each day." />
+      <PageHead eyebrow="Your records" title="History" sub="Every day you’ve recorded. Open a day to see and edit all of its entries." />
 
       <div className="seg" role="tablist">
-        <button className={custom ? '' : 'on'} onClick={() => setCustom(null)}>By month</button>
-        <button className={custom ? 'on' : ''} onClick={() => setCustom(draft)}>Date range</button>
+        {([['all', 'All'], ['month', 'By month'], ['range', 'Date range']] as const).map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={mode === k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{label}</button>
+        ))}
       </div>
 
-      {custom ? (
-        <form className="rangeRow" onSubmit={(e) => { e.preventDefault(); if (draft.from <= draft.to) setCustom(draft) }}>
-          <label className="field"><span>From</span><input type="date" value={draft.from} max={draft.to} onChange={(e) => setDraft({ ...draft, from: e.target.value })} required /></label>
-          <label className="field"><span>To</span><input type="date" value={draft.to} min={draft.from} onChange={(e) => setDraft({ ...draft, to: e.target.value })} required /></label>
-          <button className="btn" style={{ minHeight: 44 }}>Show</button>
-        </form>
-      ) : (
+      {mode === 'month' && (
         <div className="monthBar">
           <button className="iconBtn" onClick={() => setMonth(addMonths(month, -1))} aria-label="Previous month"><ChevronLeft size={20} /></button>
           <b>{fmtDate(month, { month: 'long', year: 'numeric' })}</b>
           <button className="iconBtn" onClick={() => setMonth(addMonths(month, 1))} disabled={month >= thisMonth} aria-label="Next month"><ChevronRight size={20} /></button>
+        </div>
+      )}
+      {mode === 'range' && (
+        <div className="rangeRow">
+          <label className="field"><span>From</span><DateField value={range.from} max={range.to} onChange={(d) => setRange({ ...range, from: d })} label="From" /></label>
+          <label className="field"><span>To</span><DateField value={range.to} min={range.from} max={today} onChange={(d) => setRange({ ...range, to: d })} label="To" /></label>
         </div>
       )}
 
@@ -49,11 +52,11 @@ export default function History() {
           <div><span>Revenue</span><b>{inr(toPaise(data.totals.revenue))}</b></div>
           <div><span>Expenses</span><b>{inr(toPaise(data.totals.expenses))}</b></div>
           <div><span>Handed over</span><b>{inr(toPaise(data.totals.handovers))}</b></div>
-          <div><span>In hand at end</span><b>{inr(toPaise(data.totals.closingBalance))}</b></div>
+          <div><span>{mode === 'all' ? 'Cash in hand' : 'In hand at end'}</span><b>{inr(toPaise(data.totals.closingBalance))}</b></div>
         </div>
       )}
 
-      <div className="sectionHead"><p className="hint" style={{ margin: 0 }}>{days.length} {days.length === 1 ? 'day' : 'days'} recorded</p></div>
+      <div className="sectionHead"><p className="hint" style={{ margin: 0 }}>{days.length} {days.length === 1 ? 'day' : 'days'} recorded · In hand is the running balance</p></div>
 
       {error && !data ? (
         <div className="banner danger"><span className="grow">{error.status === 0 ? 'You’re offline and this period isn’t saved on this device yet.' : error.message}</span><button className="pill" onClick={reload}>Retry</button></div>
@@ -63,20 +66,23 @@ export default function History() {
         <>
           <div className="histHead"><span>Date</span><span className="figs"><span>Revenue</span><span>Expenses</span><span>Handed over</span><span>In hand</span></span></div>
           <div className="list">
-            {days.map((d) => (
-              <button key={d.date} className="row histRow" onClick={() => navigate(d.date === today ? '/' : `/?date=${d.date}`)}>
-                <span className="iconTile soft"><CalendarDays size={19} strokeWidth={1.7} /></span>
-                <span className="rowCopy">
-                  <b>{fmtDate(d.date)}</b>
-                  <small className="sumLine">In {inr(toPaise(d.revenue))} · Spent {inr(toPaise(d.expenses))} · Out {inr(toPaise(d.handovers))}</small>
-                </span>
-                <span className="figs">
-                  <span>{inr(toPaise(d.revenue))}</span><span>{inr(toPaise(d.expenses))}</span><span>{inr(toPaise(d.handovers))}</span>
-                </span>
-                <span className={'amount' + (toPaise(d.balance) >= 0 ? ' pos' : '')}>{inr(toPaise(d.balance))}</span>
-                <Open size={16} color="var(--muted)" />
-              </button>
-            ))}
+            {days.map((d) => {
+              const [name, date] = dayLabel(d.date, today)
+              return (
+                <button key={d.date} className="row histRow" onClick={() => navigate(`/history/${d.date}`)}>
+                  <span className="iconTile soft"><CalendarDays size={19} strokeWidth={1.7} /></span>
+                  <span className="rowCopy">
+                    <b>{name}, {date}</b>
+                    <small className="sumLine">In {inr(toPaise(d.revenue))} · Spent {inr(toPaise(d.expenses))}{toPaise(d.handovers) ? ` · Out ${inr(toPaise(d.handovers))}` : ''}</small>
+                  </span>
+                  <span className="figs">
+                    <span>{inr(toPaise(d.revenue))}</span><span>{inr(toPaise(d.expenses))}</span><span>{inr(toPaise(d.handovers))}</span>
+                  </span>
+                  <span className={'amount' + (toPaise(d.balance) >= 0 ? ' pos' : '')}>{inr(toPaise(d.balance))}</span>
+                  <ChevronRight className="chev" size={16} />
+                </button>
+              )
+            })}
           </div>
         </>
       )}

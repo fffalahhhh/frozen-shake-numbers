@@ -1,68 +1,60 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router'
-import { Banknote, ChevronLeft, ChevronRight, CirclePlus, CloudOff, Forward, ReceiptText, TrendingUp, Users, Wallet } from 'lucide-react'
+import { Link } from 'react-router'
+import { Banknote, CirclePlus, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
 import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type Totals } from '../api'
 import { useSession } from '../session'
-import { applyOps, overlayOps, useSync } from '../sync'
-import { addDays, fmtDate, inr, sum, toPaise, todayIn } from '../lib'
-import { Empty, Skeleton } from '../ui'
+import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
+import { addDays, fmtDate, inr, newestFirst, sum, toPaise, todayIn } from '../lib'
+import { Empty, Skeleton, Status } from '../ui'
 import { RevenueSheet, TxnSheet } from '../sheets'
 
-type SheetState = null | { type: 'revenue' } | { type: 'expense'; item?: Expense } | { type: 'handover'; item?: Handover }
+const RECENT_REVENUE = 7
+const RECENT_EXPENSES = 10
 
-const newestFirst = (a: { createdAt?: string }, b: { createdAt?: string }) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense } | { type: 'handover' }
 
-export default function Today() {
+/** "Today" / "Yesterday" / "Friday", plus the date. */
+export function dayLabel(date: string, today: string): [string, string] {
+  const name = date === today ? 'Today' : date === addDays(today, -1) ? 'Yesterday' : fmtDate(date, { weekday: 'long' })
+  return [name, fmtDate(date, { day: 'numeric', month: 'short', year: 'numeric' })]
+}
+
+export default function Home() {
   const shop = useSession().shop as Shop
-  const [params, setParams] = useSearchParams()
   const today = todayIn(shop.timezone)
-  const p = params.get('date')
-  const date = p && /^\d{4}-\d{2}-\d{2}$/.test(p) ? p : today
-  const setDate = (d: string) => setParams(d === today ? {} : { date: d }, { replace: true })
   const [sheet, setSheet] = useState<SheetState>(null)
   useSync() // re-render when queued changes come and go
 
   const base = `/shops/${shop.id}`
-  const range = `?from=${date}&to=${date}`
-  const rev = useFetch<{ revenue: Revenue[] }>(`${base}/revenue${range}`)
-  const exp = useFetch<{ items: Expense[] }>(`${base}/expenses${range}`)
-  const ho = useFetch<{ items: Handover[] }>(`${base}/handovers${range}`)
+  const rev = useFetch<{ revenue: Revenue[] }>(`${base}/revenue?limit=${RECENT_REVENUE}`)
+  const exp = useFetch<{ items: Expense[] }>(`${base}/expenses?limit=${RECENT_EXPENSES}`)
+  const ho = useFetch<{ items: Handover[] }>(`${base}/handovers?limit=10`) // only to reflect unsynced handovers in the totals
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
   const summary = useFetch<{ summary: Totals; since: string | null }>(`${base}/summary`)
 
-  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), (i) => i.date === date).sort(newestFirst)
-  const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), (i) => i.date === date).sort(newestFirst)
-  const revOp = overlayOps(shop.id, 'revenue', rev.loadedAt).filter((o) => o.targetId === date).at(-1)
-  const revenue = revOp?.body?.amount ?? rev.data?.revenue[0]?.amount
-  const revPending = !!revOp && !revOp.syncedAt
+  const revenues = applyRevenueOps(rev.data?.revenue ?? [], overlayOps(shop.id, 'revenue', rev.loadedAt))
+  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), () => true).sort(newestFirst)
+  const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), () => true)
 
-  // Cards are all-time: server totals, adjusted for unsynced changes on the day being viewed.
+  // All-time totals from the server, adjusted for changes that haven't synced yet.
   const all = summary.data?.summary
-  const allRevenue = toPaise(all?.revenue) + toPaise(revenue) - toPaise(rev.data?.revenue[0]?.amount)
+  const allRevenue = toPaise(all?.revenue) + sum(revenues) - sum(rev.data?.revenue ?? [])
   const allExpenses = toPaise(all?.expenses) + sum(expenses) - sum(exp.data?.items ?? [])
   const allHandovers = toPaise(all?.handovers) + sum(handovers) - sum(ho.data?.items ?? [])
   const cash = allRevenue - allExpenses - allHandovers
   const since = summary.data?.since
-
-  const loading = [rev, exp, ho].some((f) => f.loading && !f.data)
-  const offlineMiss = [rev, exp, ho].some((f) => f.error?.status === 0 && !f.data)
-  const loadError = [rev, exp, ho].find((f) => f.error && f.error.status !== 0 && !f.data)?.error
+  const offline = [rev, exp, summary].some((f) => f.error?.status === 0 && !f.data)
 
   return (
     <>
       <header className="pageHead">
         <div className="eyebrow">{shop.name}</div>
-        <h1>Daily book</h1>
-        <p>All-time cash in hand, and each day’s entries below.</p>
+        <h1>Cash book</h1>
+        <p>All-time cash in hand and your latest entries.</p>
       </header>
 
-      {offlineMiss && (
-        <div className="banner warn"><CloudOff size={18} /><span className="grow">You’re offline and this day isn’t saved on this device yet. Anything you add now will sync when you’re back online.</span></div>
-      )}
-      {loadError && (
-        <div className="banner danger"><span className="grow">{loadError.message}</span><button className="pill" onClick={() => [rev, exp, ho].forEach((f) => f.reload())}>Retry</button></div>
-      )}
+      {offline && <div className="banner warn"><span className="grow">You’re offline and nothing is saved on this device yet. New entries will sync when you’re back online.</span></div>}
 
       <div className="todayGrid">
         <div className="side">
@@ -83,78 +75,50 @@ export default function Today() {
           </section>
 
           <div className="actions">
-            <button className="action" onClick={() => setSheet({ type: 'revenue' })}><i><TrendingUp size={21} strokeWidth={1.8} /></i>Add revenue</button>
+            <button className="action" onClick={() => setSheet({ type: 'revenue', date: today })}><i><TrendingUp size={21} strokeWidth={1.8} /></i>Add revenue</button>
             <button className="action" onClick={() => setSheet({ type: 'expense' })}><i><CirclePlus size={21} strokeWidth={1.8} /></i>Add expense</button>
             <button className="action" onClick={() => setSheet({ type: 'handover' })}><i><Forward size={21} strokeWidth={1.8} /></i>Hand over</button>
           </div>
         </div>
 
         <div>
-          <div className="dateBar">
-            <button className="iconBtn" onClick={() => setDate(addDays(date, -1))} aria-label="Previous day"><ChevronLeft size={20} /></button>
-            <div className="center">
-              <label>
-                <b>{fmtDate(date)}</b>
-                <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Choose date" />
-              </label>
-              {date === today
-                ? <small>Today · tap the date to change it</small>
-                : <small><button className="link" style={{ padding: 0, fontSize: 'inherit', position: 'relative', zIndex: 1 }} onClick={() => setDate(today)}>Tap to return to today</button></small>}
-            </div>
-            <button className="iconBtn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} aria-label="Next day"><ChevronRight size={20} /></button>
-          </div>
-
-          <div className="sectionHead"><h2>Daily revenue</h2></div>
-          {loading ? <Skeleton rows={1} /> : (
-            <div className="list">
-              <button className="row" onClick={() => setSheet({ type: 'revenue' })}>
-                <span className="iconTile"><Banknote size={20} strokeWidth={1.7} /></span>
-                <span className="rowCopy">
-                  <b>Cash sales{revPending && <span className="chip">Pending sync</span>}</b>
-                  <small>{revenue === undefined ? 'Not entered yet · tap to add' : 'One total for the day'}</small>
-                </span>
-                <span className="amount pos">{inr(toPaise(revenue))}</span>
-              </button>
-            </div>
-          )}
-
           <div className="sectionHead">
-            <h2>Expenses</h2><span className="count">{expenses.length}</span>
-            <button className="link" onClick={() => setSheet({ type: 'expense' })}>Add</button>
+            <h2>Recent revenue</h2>
+            <Link className="link" to="/history">See all</Link>
           </div>
-          {loading ? <Skeleton /> : expenses.length === 0
-            ? <Empty icon={ReceiptText} title="No expenses yet" text="Add shop stock, utilities or another expense to keep your cash total accurate." />
+          {rev.loading && !rev.data ? <Skeleton rows={2} /> : revenues.length === 0
+            ? <Empty icon={Banknote} title="No revenue yet" text="Tap Add revenue to record today’s total cash sales." />
             : (
               <div className="list">
-                {expenses.map((e) => (
-                  <button className="row" key={e.id} onClick={() => setSheet({ type: 'expense', item: e })}>
-                    <span className="iconTile soft"><ReceiptText size={19} strokeWidth={1.7} /></span>
-                    <span className="rowCopy">
-                      <b>{e.categoryName}<Status item={e} /></b>
-                      <small>{e.note || 'No note'}</small>
-                    </span>
-                    <span className="amount">−{inr(toPaise(e.amount))}</span>
-                  </button>
-                ))}
+                {revenues.slice(0, RECENT_REVENUE).map((r) => {
+                  const [name, date] = dayLabel(r.date, today)
+                  return (
+                    <button className="row" key={r.date} onClick={() => setSheet({ type: 'revenue', date: r.date })}>
+                      <span className="iconTile"><Banknote size={20} strokeWidth={1.7} /></span>
+                      <span className="rowCopy"><b>{name}<Status item={r} /></b><small>{date}</small></span>
+                      <span className="amount pos">{inr(toPaise(r.amount))}</span>
+                    </button>
+                  )
+                })}
               </div>
             )}
 
           <div className="sectionHead">
-            <h2>Partner handovers</h2><span className="count">{handovers.length}</span>
-            <button className="link" onClick={() => setSheet({ type: 'handover' })}>Add</button>
+            <h2>Recent expenses</h2>
+            <Link className="link" to="/history">See all</Link>
           </div>
-          {loading ? <Skeleton rows={1} /> : handovers.length === 0
-            ? <Empty icon={Users} title="No handovers today" text="When you give cash to a partner, record it here. It’s taken out of cash in hand, not counted as an expense." />
+          {exp.loading && !exp.data ? <Skeleton /> : expenses.length === 0
+            ? <Empty icon={ReceiptText} title="No expenses yet" text="Add shop stock, utilities or another expense to keep your cash total accurate." />
             : (
               <div className="list">
-                {handovers.map((h) => (
-                  <button className="row" key={h.id} onClick={() => setSheet({ type: 'handover', item: h })}>
-                    <span className="iconTile warm"><Forward size={19} strokeWidth={1.7} /></span>
+                {expenses.slice(0, RECENT_EXPENSES).map((e) => (
+                  <button className="row" key={e.id} onClick={() => setSheet({ type: 'expense', item: e })}>
+                    <span className="iconTile soft"><ReceiptText size={19} strokeWidth={1.7} /></span>
                     <span className="rowCopy">
-                      <b>{h.partnerName}<Status item={h} /></b>
-                      <small>{h.note || 'Cash handed over'}</small>
+                      <b>{e.categoryName}<Status item={e} /></b>
+                      <small>{dayLabel(e.date, today)[0]}, {fmtDate(e.date, { day: 'numeric', month: 'short' })}{e.note ? ` · ${e.note}` : ''}</small>
                     </span>
-                    <span className="amount">−{inr(toPaise(h.amount))}</span>
+                    <span className="amount">−{inr(toPaise(e.amount))}</span>
                   </button>
                 ))}
               </div>
@@ -162,19 +126,13 @@ export default function Today() {
         </div>
       </div>
 
-      {sheet?.type === 'revenue' && <RevenueSheet shop={shop} date={date} current={revenue} onClose={() => setSheet(null)} />}
+      {sheet?.type === 'revenue' && <RevenueSheet shop={shop} date={sheet.date} onClose={() => setSheet(null)} />}
       {sheet?.type === 'expense' && (
-        <TxnSheet kind="expense" shop={shop} date={date} item={sheet.item} options={cats.data?.categories ?? []} onClose={() => setSheet(null)} />
+        <TxnSheet kind="expense" shop={shop} date={today} item={sheet.item} options={cats.data?.categories ?? []} onClose={() => setSheet(null)} />
       )}
       {sheet?.type === 'handover' && (
-        <TxnSheet kind="handover" shop={shop} date={date} item={sheet.item} options={parts.data?.partners ?? []} onClose={() => setSheet(null)} />
+        <TxnSheet kind="handover" shop={shop} date={today} options={parts.data?.partners ?? []} onClose={() => setSheet(null)} />
       )}
     </>
   )
-}
-
-export function Status({ item }: { item: { pending?: boolean; failed?: boolean } }) {
-  if (item.failed) return <span className="chip danger">Not saved</span>
-  if (item.pending) return <span className="chip">Pending sync</span>
-  return null
 }

@@ -23,10 +23,14 @@ func (a *app) listRevenue(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 	if err != nil {
 		return err
 	}
+	limit := 1000
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v < limit {
+		limit = v
+	}
 	rows, err := a.db.Query(r.Context(), `
 		SELECT business_date::text, amount::text, updated_at FROM daily_revenues
 		WHERE shop_id = $1 AND ($2::date IS NULL OR business_date >= $2) AND ($3::date IS NULL OR business_date <= $3)
-		ORDER BY business_date DESC LIMIT 1000`, sc.ID, from, to)
+		ORDER BY business_date DESC LIMIT $4`, sc.ID, from, to, limit)
 	if err != nil {
 		return err
 	}
