@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Banknote, ChevronLeft, ChevronRight, CirclePlus, CloudOff, Forward, ReceiptText, TrendingUp, Users, Wallet } from 'lucide-react'
-import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop } from '../api'
+import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, overlayOps, useSync } from '../sync'
-import { addDays, cashInHand, fmtDate, inr, sum, toPaise, todayIn } from '../lib'
+import { addDays, fmtDate, inr, sum, toPaise, todayIn } from '../lib'
 import { Empty, Skeleton } from '../ui'
 import { RevenueSheet, TxnSheet } from '../sheets'
 
@@ -29,13 +29,21 @@ export default function Today() {
   const ho = useFetch<{ items: Handover[] }>(`${base}/handovers${range}`)
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
+  const summary = useFetch<{ summary: Totals; since: string | null }>(`${base}/summary`)
 
   const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), (i) => i.date === date).sort(newestFirst)
   const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), (i) => i.date === date).sort(newestFirst)
   const revOp = overlayOps(shop.id, 'revenue', rev.loadedAt).filter((o) => o.targetId === date).at(-1)
   const revenue = revOp?.body?.amount ?? rev.data?.revenue[0]?.amount
   const revPending = !!revOp && !revOp.syncedAt
-  const cash = cashInHand(revenue, expenses, handovers)
+
+  // Cards are all-time: server totals, adjusted for unsynced changes on the day being viewed.
+  const all = summary.data?.summary
+  const allRevenue = toPaise(all?.revenue) + toPaise(revenue) - toPaise(rev.data?.revenue[0]?.amount)
+  const allExpenses = toPaise(all?.expenses) + sum(expenses) - sum(exp.data?.items ?? [])
+  const allHandovers = toPaise(all?.handovers) + sum(handovers) - sum(ho.data?.items ?? [])
+  const cash = allRevenue - allExpenses - allHandovers
+  const since = summary.data?.since
 
   const loading = [rev, exp, ho].some((f) => f.loading && !f.data)
   const offlineMiss = [rev, exp, ho].some((f) => f.error?.status === 0 && !f.data)
@@ -46,7 +54,7 @@ export default function Today() {
       <header className="pageHead">
         <div className="eyebrow">{shop.name}</div>
         <h1>Daily book</h1>
-        <p>Your sales, spending and cash for the day.</p>
+        <p>All-time cash in hand, and each day’s entries below.</p>
       </header>
 
       {offlineMiss && (
@@ -58,6 +66,30 @@ export default function Today() {
 
       <div className="todayGrid">
         <div className="side">
+          <section className="hero" aria-label="All-time cash summary">
+            <div className="top">
+              <span>
+                <span className="label">Cash in hand</span>
+                <small className="since">{since ? `All time · since ${fmtDate(since, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'All time'}</small>
+              </span>
+              <span className="wallet"><Wallet size={22} strokeWidth={1.7} /></span>
+            </div>
+            <strong className={cash < 0 ? 'neg' : ''}>{inr(cash)}</strong>
+            <div className="heroCards">
+              <div><span>Revenue</span><b>{inr(allRevenue)}</b></div>
+              <div><span>Expenses</span><b>{inr(allExpenses)}</b></div>
+              <div><span>Handed over</span><b>{inr(allHandovers)}</b></div>
+            </div>
+          </section>
+
+          <div className="actions">
+            <button className="action" onClick={() => setSheet({ type: 'revenue' })}><i><TrendingUp size={21} strokeWidth={1.8} /></i>Add revenue</button>
+            <button className="action" onClick={() => setSheet({ type: 'expense' })}><i><CirclePlus size={21} strokeWidth={1.8} /></i>Add expense</button>
+            <button className="action" onClick={() => setSheet({ type: 'handover' })}><i><Forward size={21} strokeWidth={1.8} /></i>Hand over</button>
+          </div>
+        </div>
+
+        <div>
           <div className="dateBar">
             <button className="iconBtn" onClick={() => setDate(addDays(date, -1))} aria-label="Previous day"><ChevronLeft size={20} /></button>
             <div className="center">
@@ -72,27 +104,6 @@ export default function Today() {
             <button className="iconBtn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} aria-label="Next day"><ChevronRight size={20} /></button>
           </div>
 
-          <section className="hero" aria-label="Daily summary">
-            <div className="top">
-              <span className="label">Cash in hand</span>
-              <span className="wallet"><Wallet size={22} strokeWidth={1.7} /></span>
-            </div>
-            <strong className={cash < 0 ? 'neg' : ''}>{inr(cash)}</strong>
-            <div className="heroCards">
-              <div><span>Revenue</span><b>{inr(toPaise(revenue))}</b></div>
-              <div><span>Expenses</span><b>{inr(sum(expenses))}</b></div>
-              <div><span>Handed over</span><b>{inr(sum(handovers))}</b></div>
-            </div>
-          </section>
-
-          <div className="actions">
-            <button className="action" onClick={() => setSheet({ type: 'revenue' })}><i><TrendingUp size={21} strokeWidth={1.8} /></i>Add revenue</button>
-            <button className="action" onClick={() => setSheet({ type: 'expense' })}><i><CirclePlus size={21} strokeWidth={1.8} /></i>Add expense</button>
-            <button className="action" onClick={() => setSheet({ type: 'handover' })}><i><Forward size={21} strokeWidth={1.8} /></i>Hand over</button>
-          </div>
-        </div>
-
-        <div>
           <div className="sectionHead"><h2>Daily revenue</h2></div>
           {loading ? <Skeleton rows={1} /> : (
             <div className="list">

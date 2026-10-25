@@ -1,13 +1,13 @@
 // Run with: npm test  (node --test, no extra deps)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addDays, cashInHand, fromPaise, isAmount, monthBounds, toPaise, todayIn } from './lib.ts'
+import { addDays, fromPaise, isAmount, monthBounds, sum, toPaise, todayIn } from './lib.ts'
 
 test('cash in hand = revenue − expenses − handovers', () => {
-  const p = cashInHand('4000.00', [{ amount: '820.50' }, { amount: '229.50' }], [{ amount: '500' }])
+  const p = toPaise('4000.00') - sum([{ amount: '820.50' }, { amount: '229.50' }]) - sum([{ amount: '500' }])
   assert.equal(p, 245000)
   assert.equal(fromPaise(p), '2450.00')
-  assert.equal(cashInHand(undefined, [{ amount: '0.10' }, { amount: '0.20' }], []), -30) // no float drift
+  assert.equal(toPaise(undefined) - sum([{ amount: '0.10' }, { amount: '0.20' }]), -30) // no float drift
 })
 
 test('amount parsing', () => {

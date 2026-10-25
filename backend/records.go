@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -382,18 +383,52 @@ func (a *app) deactivateNamed(table string) func(http.ResponseWriter, *http.Requ
 	}
 }
 
-// ---------- History ----------
+// ---------- Summary & history ----------
+// Cash in hand is a running, all-time balance: every revenue minus every
+// expense minus every partner handover (handovers are not expenses). A day's
+// entries are still dated, but a day isn't expected to balance on its own.
 
-type dayRow struct {
-	Date       string `json:"date"`
+type totals struct {
 	Revenue    string `json:"revenue"`
 	Expenses   string `json:"expenses"`
 	Handovers  string `json:"handovers"`
 	CashInHand string `json:"cashInHand"`
 }
 
+// totalsBefore sums everything dated before `before` (nil = all time) and
+// returns the earliest date with any activity.
+func (a *app) totalsBefore(ctx context.Context, shopID string, before *string) (t totals, since *string, err error) {
+	err = a.db.QueryRow(ctx, `
+		SELECT r::text, e::text, h::text, (r - e - h)::text, first::text FROM (SELECT
+			(SELECT COALESCE(sum(amount), 0.00) FROM daily_revenues WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) r,
+			(SELECT COALESCE(sum(amount), 0.00) FROM expenses WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) e,
+			(SELECT COALESCE(sum(amount), 0.00) FROM partner_handovers WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) h,
+			LEAST((SELECT min(business_date) FROM daily_revenues WHERE shop_id = $1),
+				(SELECT min(business_date) FROM expenses WHERE shop_id = $1),
+				(SELECT min(business_date) FROM partner_handovers WHERE shop_id = $1)) first
+		) x`, shopID, before).Scan(&t.Revenue, &t.Expenses, &t.Handovers, &t.CashInHand, &since)
+	return
+}
+
+// summary: all-time totals for the shop.
+func (a *app) summary(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	t, since, err := a.totalsBefore(r.Context(), sc.ID, nil)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"summary": t, "since": since})
+}
+
+type dayRow struct {
+	Date      string `json:"date"`
+	Revenue   string `json:"revenue"`
+	Expenses  string `json:"expenses"`
+	Handovers string `json:"handovers"`
+	Net       string `json:"net"`     // revenue − expenses − handovers for that day
+	Balance   string `json:"balance"` // cash in hand at the end of that day (running total)
+}
+
 // history returns one row per date that has any activity in [from, to].
-// Cash in hand = revenue − expenses − handovers (handovers are not expenses).
 func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
 	from, err := parseDate(r.URL.Query().Get("from"))
 	if err != nil {
@@ -403,6 +438,11 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 	if err != nil {
 		return invalid("to: Date must be YYYY-MM-DD")
 	}
+	before, _, err := a.totalsBefore(r.Context(), sc.ID, &from)
+	if err != nil {
+		return err
+	}
+	opening := before.CashInHand
 	rows, err := a.db.Query(r.Context(), `
 		WITH rev AS (
 			SELECT business_date d, amount FROM daily_revenues
@@ -414,10 +454,12 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 			SELECT business_date d, sum(amount) amount FROM partner_handovers
 			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 GROUP BY 1
 		), t AS (
-			SELECT d, COALESCE(rev.amount, 0) r, COALESCE(exp.amount, 0) e, COALESCE(ho.amount, 0) h
+			SELECT d, COALESCE(rev.amount, 0.00) r, COALESCE(exp.amount, 0.00) e, COALESCE(ho.amount, 0.00) h
 			FROM rev FULL JOIN exp USING (d) FULL JOIN ho USING (d)
 		)
-		SELECT d::text, r::text, e::text, h::text, (r - e - h)::text FROM t ORDER BY d DESC`, sc.ID, from, to)
+		SELECT d::text, r::text, e::text, h::text, (r - e - h)::text,
+			($4::numeric + sum(r - e - h) OVER (ORDER BY d))::text
+		FROM t ORDER BY d DESC`, sc.ID, from, to, opening)
 	if err != nil {
 		return err
 	}
@@ -425,19 +467,16 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 	if err != nil {
 		return err
 	}
-	total := dayRow{}
+	var rev, exp, ho, net string
 	for _, d := range days {
-		total.Revenue = addMoney(total.Revenue, d.Revenue)
-		total.Expenses = addMoney(total.Expenses, d.Expenses)
-		total.Handovers = addMoney(total.Handovers, d.Handovers)
-		total.CashInHand = addMoney(total.CashInHand, d.CashInHand)
+		rev, exp, ho, net = addMoney(rev, d.Revenue), addMoney(exp, d.Expenses), addMoney(ho, d.Handovers), addMoney(net, d.Net)
 	}
 	if days == nil {
 		days = []dayRow{}
 	}
 	return writeJSON(w, http.StatusOK, map[string]any{"days": days, "totals": map[string]string{
-		"revenue": addMoney(total.Revenue, "0"), "expenses": addMoney(total.Expenses, "0"),
-		"handovers": addMoney(total.Handovers, "0"), "cashInHand": addMoney(total.CashInHand, "0"),
+		"revenue": addMoney(rev, "0"), "expenses": addMoney(exp, "0"), "handovers": addMoney(ho, "0"),
+		"net": addMoney(net, "0"), "openingBalance": addMoney(opening, "0"), "closingBalance": addMoney(opening, net),
 	}})
 }
 

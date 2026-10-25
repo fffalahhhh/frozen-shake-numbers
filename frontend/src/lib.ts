@@ -31,11 +31,7 @@ export function inr(p: number): string {
   return (p % 100 === 0 ? inr0 : inr2).format(p / 100)
 }
 
-/** Cash in hand = revenue − expenses − partner handovers (handovers are not expenses). */
-export function cashInHand(revenue: string | undefined, expenses: { amount: string }[], handovers: { amount: string }[]): number {
-  return toPaise(revenue) - sum(expenses) - sum(handovers)
-}
-
+/** Total of the amounts, in paise. */
 export function sum(items: { amount: string }[]): number {
   return items.reduce((t, i) => t + toPaise(i.amount), 0)
 }

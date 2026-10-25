@@ -9,7 +9,8 @@ export type Revenue = { date: string; amount: string }
 type TxnBase = { id: string; date: string; amount: string; note: string; createdAt?: string; pending?: boolean; failed?: boolean }
 export type Expense = TxnBase & { categoryId: string; categoryName: string }
 export type Handover = TxnBase & { partnerId: string; partnerName: string }
-export type HistoryDay = { date: string; revenue: string; expenses: string; handovers: string; cashInHand: string }
+export type HistoryDay = { date: string; revenue: string; expenses: string; handovers: string; net: string; balance: string }
+export type Totals = { revenue: string; expenses: string; handovers: string; cashInHand: string }
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {

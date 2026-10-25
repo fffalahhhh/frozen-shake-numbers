@@ -113,18 +113,36 @@ historical records keep a valid reference.
 | `PUT /shops/{shopId}/partners/{id}` | `{name?, active?}` |
 | `DELETE /shops/{shopId}/partners/{id}` | Deactivate |
 
-## History
+## Summary & history
+
+Cash in hand is a **running, all-time balance**: every revenue minus every
+expense minus every partner handover. Handovers are not counted as expenses.
+Entries are still dated, but a single day doesn't need to balance on its own.
+
+`GET /shops/{shopId}/summary`
+
+```json
+{
+  "summary": { "revenue": "353375.00", "expenses": "330878.00", "handovers": "13205.00", "cashInHand": "9292.00" },
+  "since": "2026-10-03"
+}
+```
 
 `GET /shops/{shopId}/history?from=YYYY-MM-DD&to=YYYY-MM-DD` (both required)
 
 ```json
 {
   "days": [
-    { "date": "2026-10-13", "revenue": "4000.00", "expenses": "1050.00", "handovers": "500.00", "cashInHand": "2450.00" }
+    { "date": "2026-10-14", "revenue": "1000.00", "expenses": "3000.00", "handovers": "0.00", "net": "-2000.00", "balance": "550.00" },
+    { "date": "2026-10-13", "revenue": "4000.00", "expenses": "1050.00", "handovers": "500.00", "net": "2450.00", "balance": "2550.00" }
   ],
-  "totals": { "revenue": "4000.00", "expenses": "1050.00", "handovers": "500.00", "cashInHand": "2450.00" }
+  "totals": { "revenue": "5000.00", "expenses": "4050.00", "handovers": "500.00", "net": "450.00", "openingBalance": "100.00", "closingBalance": "550.00" }
 }
 ```
 
-Only dates that have some activity are returned, newest first.
-**Cash in hand = revenue − expenses − handovers.** Handovers are not counted as expenses.
+- Only dates that have some activity are returned, newest first.
+- `net` is that day's revenue − expenses − handovers.
+- `balance` is the cash in hand at the end of that day, counting everything
+  before it.
+- `openingBalance` is the cash in hand before `from`.
+- `closingBalance` is `openingBalance` plus the period's `net`.

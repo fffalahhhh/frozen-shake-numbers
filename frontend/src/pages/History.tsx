@@ -6,7 +6,7 @@ import { useSession } from '../session'
 import { addMonths, fmtDate, inr, monthBounds, toPaise, todayIn } from '../lib'
 import { Empty, PageHead, Skeleton } from '../ui'
 
-type Totals = Omit<HistoryDay, 'date'>
+type Totals = { revenue: string; expenses: string; handovers: string; net: string; openingBalance: string; closingBalance: string }
 
 export default function History() {
   const shop = useSession().shop as Shop
@@ -23,7 +23,7 @@ export default function History() {
 
   return (
     <>
-      <PageHead eyebrow="Your records" title="History" sub="Review a day and open it to make changes." />
+      <PageHead eyebrow="Your records" title="History" sub="Review a day and open it to make changes. In hand is the running cash balance at the end of each day." />
 
       <div className="seg" role="tablist">
         <button className={custom ? '' : 'on'} onClick={() => setCustom(null)}>By month</button>
@@ -49,7 +49,7 @@ export default function History() {
           <div><span>Revenue</span><b>{inr(toPaise(data.totals.revenue))}</b></div>
           <div><span>Expenses</span><b>{inr(toPaise(data.totals.expenses))}</b></div>
           <div><span>Handed over</span><b>{inr(toPaise(data.totals.handovers))}</b></div>
-          <div><span>Cash in hand</span><b>{inr(toPaise(data.totals.cashInHand))}</b></div>
+          <div><span>In hand at end</span><b>{inr(toPaise(data.totals.closingBalance))}</b></div>
         </div>
       )}
 
@@ -61,7 +61,7 @@ export default function History() {
         <Empty icon={CalendarDays} title="Your history starts here" text="Each day you record revenue, expenses or a partner handover will appear here." />
       ) : (
         <>
-          <div className="histHead"><span>Date</span><span className="figs"><span>Revenue</span><span>Expenses</span><span>Handed over</span><span>Cash in hand</span></span></div>
+          <div className="histHead"><span>Date</span><span className="figs"><span>Revenue</span><span>Expenses</span><span>Handed over</span><span>In hand</span></span></div>
           <div className="list">
             {days.map((d) => (
               <button key={d.date} className="row histRow" onClick={() => navigate(d.date === today ? '/' : `/?date=${d.date}`)}>
@@ -73,7 +73,7 @@ export default function History() {
                 <span className="figs">
                   <span>{inr(toPaise(d.revenue))}</span><span>{inr(toPaise(d.expenses))}</span><span>{inr(toPaise(d.handovers))}</span>
                 </span>
-                <span className={'amount' + (toPaise(d.cashInHand) >= 0 ? ' pos' : '')}>{inr(toPaise(d.cashInHand))}</span>
+                <span className={'amount' + (toPaise(d.balance) >= 0 ? ' pos' : '')}>{inr(toPaise(d.balance))}</span>
                 <Open size={16} color="var(--muted)" />
               </button>
             ))}

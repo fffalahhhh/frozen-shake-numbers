@@ -120,20 +120,43 @@ func TestCashInHand(t *testing.T) {
 	c.must(201, "POST", base+"/expenses", map[string]any{"date": day, "amount": "229.50", "categoryId": cat})
 	c.must(201, "POST", base+"/handovers", map[string]any{"date": day, "amount": "500", "partnerId": partner})
 
+	// A later day that spends more than it earns: cash in hand carries over.
+	c.must(200, "PUT", base+"/revenue/2026-10-14", map[string]any{"amount": "1000"})
+	c.must(201, "POST", base+"/expenses", map[string]any{"date": "2026-10-14", "amount": "3000", "categoryId": cat})
+	// An earlier month, so October opens with a balance.
+	c.must(200, "PUT", base+"/revenue/2026-09-30", map[string]any{"amount": "100"})
+
 	h := c.must(200, "GET", base+"/history?from=2026-10-01&to=2026-10-31", nil)
 	days := h["days"].([]any)
-	if len(days) != 1 {
-		t.Fatalf("want 1 history day, got %v", days)
+	if len(days) != 2 {
+		t.Fatalf("want 2 history days, got %v", days)
 	}
-	d := days[0].(map[string]any)
-	want := map[string]string{"date": day, "revenue": "4000.00", "expenses": "1050.00", "handovers": "500.00", "cashInHand": "2450.00"}
-	for k, v := range want {
-		if d[k] != v {
-			t.Errorf("history %s = %v, want %s", k, d[k], v)
+	for i, want := range []map[string]string{
+		{"date": "2026-10-14", "revenue": "1000.00", "expenses": "3000.00", "handovers": "0.00", "net": "-2000.00", "balance": "550.00"},
+		{"date": day, "revenue": "4000.00", "expenses": "1050.00", "handovers": "500.00", "net": "2450.00", "balance": "2550.00"},
+	} {
+		d := days[i].(map[string]any)
+		for k, v := range want {
+			if d[k] != v {
+				t.Errorf("history %s %s = %v, want %s", want["date"], k, d[k], v)
+			}
 		}
 	}
-	if tot := h["totals"].(map[string]any); tot["cashInHand"] != "2450.00" {
-		t.Errorf("totals cashInHand = %v", tot["cashInHand"])
+	tot := h["totals"].(map[string]any)
+	if tot["openingBalance"] != "100.00" || tot["net"] != "450.00" || tot["closingBalance"] != "550.00" {
+		t.Errorf("totals = %v", tot)
+	}
+
+	// All-time summary: 5100 − 4050 − 500.
+	sum := c.must(200, "GET", base+"/summary", nil)
+	want := map[string]string{"revenue": "5100.00", "expenses": "4050.00", "handovers": "500.00", "cashInHand": "550.00"}
+	for k, v := range want {
+		if got := sum["summary"].(map[string]any)[k]; got != v {
+			t.Errorf("summary %s = %v, want %s", k, got, v)
+		}
+	}
+	if sum["since"] != "2026-09-30" {
+		t.Errorf("since = %v", sum["since"])
 	}
 
 	// Validation: negative / zero / too precise amounts are rejected.
@@ -166,7 +189,7 @@ func TestTenantIsolation(t *testing.T) {
 	for _, req := range [][2]string{
 		{"GET", a}, {"PUT", a}, {"DELETE", a},
 		{"GET", a + "/expenses"}, {"GET", a + "/revenue"}, {"PUT", a + "/revenue/" + day},
-		{"GET", a + "/history?from=2026-10-01&to=2026-10-31"}, {"GET", a + "/categories"}, {"GET", a + "/partners"},
+		{"GET", a + "/history?from=2026-10-01&to=2026-10-31"}, {"GET", a + "/summary"}, {"GET", a + "/categories"}, {"GET", a + "/partners"},
 		{"PUT", a + "/expenses/" + expID}, {"DELETE", a + "/expenses/" + expID},
 		{"POST", a + "/handovers"}, {"PUT", a + "/categories/" + aCat}, {"DELETE", a + "/partners/" + aPartner},
 	} {

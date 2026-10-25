@@ -175,6 +175,7 @@ func (a *app) routes() http.Handler {
 	m.Handle("DELETE /api/shops/{shopId}/handovers/{id}", a.shop(roleMember, a.deleteTxn(handoverKind)))
 
 	m.Handle("GET /api/shops/{shopId}/history", a.shop(roleMember, a.history))
+	m.Handle("GET /api/shops/{shopId}/summary", a.shop(roleMember, a.summary))
 
 	m.Handle("/api/", h(func(w http.ResponseWriter, r *http.Request) error { return errNotFound }))
 	if a.cfg.StaticDir != "" {
