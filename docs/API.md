@@ -104,14 +104,30 @@ historical records keep a valid reference.
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/categories` | `{categories: [{id, name, isDefault, active}]}` |
+| `GET /shops/{shopId}/categories` | `{categories: [{id, name, isDefault, active, dueAmount, dueDay}]}` |
 | `POST /shops/{shopId}/categories` | `{name}`. Names are unique per shop, ignoring case |
 | `PUT /shops/{shopId}/categories/{id}` | `{name?, active?}`: rename, hide or show |
 | `DELETE /shops/{shopId}/categories/{id}` | Hide (`active=false`) |
+| `PUT /shops/{shopId}/categories/{id}/due` | `{amount, day}` sets a monthly due (rent, bills); `{amount: null}` clears it. A due counts as paid once an expense in that category is dated in the current month |
 | `GET /shops/{shopId}/partners?from=&to=` | `{partners: [{id, name, active, totalHandedOver, handoverCount}]}`. The totals respect the date range |
 | `POST /shops/{shopId}/partners` | `{name}` |
 | `PUT /shops/{shopId}/partners/{id}` | `{name?, active?}` |
 | `DELETE /shops/{shopId}/partners/{id}` | Deactivate |
+
+## Staff & leaves
+
+Staff are available every day unless a leave is recorded for that date. Staff
+use the same add / rename / deactivate endpoints as partners.
+
+| Method & path | Notes |
+|---|---|
+| `GET /shops/{shopId}/staff` | `{staff: [{id, name, active}]}` |
+| `POST /shops/{shopId}/staff` | `{name}` |
+| `PUT /shops/{shopId}/staff/{id}` | `{name?, active?}` |
+| `DELETE /shops/{shopId}/staff/{id}` | Deactivate |
+| `GET /shops/{shopId}/leaves?from=&to=` | `{leaves: [{staffId, date, note}]}`, newest first |
+| `PUT /shops/{shopId}/staff/{id}/leaves/{date}` | `{note?}`. Marks one day off; upsert, safe to retry |
+| `DELETE /shops/{shopId}/staff/{id}/leaves/{date}` | Back to available. Idempotent |
 
 ## Summary & history
 

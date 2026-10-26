@@ -65,6 +65,12 @@ export function monthBounds(date: string): [string, string] {
   return [first.toISOString().slice(0, 10), last.toISOString().slice(0, 10)]
 }
 
+/** That day of the month containing `date`, clamped to the month's last day (31 → 30 Nov). */
+export function dayOfMonth(date: string, day: number): string {
+  const [first, last] = monthBounds(date)
+  return addDays(first, Math.min(day, Number(last.slice(8))) - 1)
+}
+
 export function addMonths(date: string, n: number): string {
   const d = utc(date)
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1)).toISOString().slice(0, 10)

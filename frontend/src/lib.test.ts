@@ -1,7 +1,7 @@
 // Run with: npm test  (node --test, no extra deps)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addDays, fromPaise, isAmount, monthBounds, sum, toPaise, todayIn } from './lib.ts'
+import { addDays, dayOfMonth, fromPaise, isAmount, monthBounds, sum, toPaise, todayIn } from './lib.ts'
 
 test('cash in hand = revenue − expenses − handovers', () => {
   const p = toPaise('4000.00') - sum([{ amount: '820.50' }, { amount: '229.50' }]) - sum([{ amount: '500' }])
@@ -21,4 +21,6 @@ test('dates stay on the shop calendar', () => {
   assert.equal(todayIn('Asia/Kolkata', new Date('2026-10-31T20:00:00Z')), '2026-11-01')
   assert.equal(addDays('2026-03-01', -1), '2026-02-28')
   assert.deepEqual(monthBounds('2024-02-10'), ['2024-02-01', '2024-02-29'])
+  assert.equal(dayOfMonth('2026-02-10', 31), '2026-02-28') // rent due on the 31st
+  assert.equal(dayOfMonth('2026-10-26', 5), '2026-10-05')
 })

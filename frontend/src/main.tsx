@@ -12,6 +12,7 @@ import Today from './pages/Today'
 import History from './pages/History'
 import Day from './pages/Day'
 import Partners from './pages/Partners'
+import Staff from './pages/Staff'
 import Settings from './pages/Settings'
 import { CreateFirstShop, ForgotPassword, Login, Register, ResetPassword } from './pages/Auth'
 
@@ -50,6 +51,7 @@ function App() {
             <Route index element={<Today />} />
             <Route path="history" element={<History />} />
             <Route path="history/:date" element={<Day />} />
+            <Route path="staff" element={<Staff />} />
             <Route path="partners" element={<Partners />} />
             <Route path="settings" element={<Settings />} />
           </Route>

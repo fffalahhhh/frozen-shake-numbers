@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { Check, Clock, CloudOff, House, RefreshCw, SlidersHorizontal, TriangleAlert, Users } from 'lucide-react'
+import { Check, Clock, CloudOff, House, RefreshCw, SlidersHorizontal, TriangleAlert, UserCheck, Users } from 'lucide-react'
 import { useSession } from './session'
 import { discard, retry, useSync, type Op } from './sync'
 import { fmtDate, inr, toPaise } from './lib'
@@ -9,6 +9,7 @@ import { Sheet } from './ui'
 const NAV = [
   { to: '/', label: 'Home', icon: House },
   { to: '/history', label: 'History', icon: Clock },
+  { to: '/staff', label: 'Staff', icon: UserCheck },
   { to: '/partners', label: 'Partners', icon: Users },
   { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
 ]

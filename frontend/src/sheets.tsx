@@ -51,6 +51,7 @@ type TxnProps = {
   shop: Shop
   date: string
   onClose: () => void
+  prefill?: { refId: string; amount: string }
 } & (
   | { kind: 'expense'; item?: Expense; options: Category[] }
   | { kind: 'handover'; item?: Handover; options: Partner[] }
@@ -65,8 +66,8 @@ export function TxnSheet(props: TxnProps) {
   const currentRef = item ? (kind === 'expense' ? (item as Expense).categoryId : (item as Handover).partnerId) : ''
   // Hidden categories / inactive partners stay selectable for records that already use them.
   const choices = options.filter((o) => o.active || o.id === currentRef)
-  const [refId, setRefId] = useState(currentRef || (kind === 'handover' ? '' : choices[0]?.id ?? ''))
-  const [amount, setAmount] = useState(item ? String(Number(item.amount)) : '')
+  const [refId, setRefId] = useState(currentRef || props.prefill?.refId || (kind === 'handover' ? '' : choices[0]?.id ?? ''))
+  const [amount, setAmount] = useState(item ? String(Number(item.amount)) : props.prefill ? String(Number(props.prefill.amount)) : '')
   const [note, setNote] = useState(item?.note ?? '')
   const [date, setDate] = useState(item?.date ?? props.date)
   const [error, setError] = useState('')

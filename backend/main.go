@@ -163,6 +163,15 @@ func (a *app) routes() http.Handler {
 	m.Handle("POST /api/shops/{shopId}/categories", a.shop(roleMember, a.createNamed("expense_categories", "Category name")))
 	m.Handle("PUT /api/shops/{shopId}/categories/{id}", a.shop(roleMember, a.updateNamed("expense_categories", "Category name")))
 	m.Handle("DELETE /api/shops/{shopId}/categories/{id}", a.shop(roleMember, a.deactivateNamed("expense_categories")))
+	m.Handle("PUT /api/shops/{shopId}/categories/{id}/due", a.shop(roleMember, a.putDue))
+
+	m.Handle("GET /api/shops/{shopId}/staff", a.shop(roleMember, a.listStaff))
+	m.Handle("POST /api/shops/{shopId}/staff", a.shop(roleMember, a.createNamed("staff", "Staff name")))
+	m.Handle("PUT /api/shops/{shopId}/staff/{id}", a.shop(roleMember, a.updateNamed("staff", "Staff name")))
+	m.Handle("DELETE /api/shops/{shopId}/staff/{id}", a.shop(roleMember, a.deactivateNamed("staff")))
+	m.Handle("GET /api/shops/{shopId}/leaves", a.shop(roleMember, a.listLeaves))
+	m.Handle("PUT /api/shops/{shopId}/staff/{id}/leaves/{date}", a.shop(roleMember, a.putLeave))
+	m.Handle("DELETE /api/shops/{shopId}/staff/{id}/leaves/{date}", a.shop(roleMember, a.deleteLeave))
 
 	m.Handle("GET /api/shops/{shopId}/partners", a.shop(roleMember, a.listPartners))
 	m.Handle("POST /api/shops/{shopId}/partners", a.shop(roleMember, a.createNamed("partners", "Partner name")))

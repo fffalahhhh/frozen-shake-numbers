@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { Banknote, CirclePlus, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
+import { Banknote, CalendarClock, CirclePlus, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
 import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
-import { addDays, fmtDate, inr, newestFirst, sum, toPaise, todayIn } from '../lib'
+import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, sum, toPaise, todayIn } from '../lib'
 import { Empty, Skeleton, Status } from '../ui'
 import { RevenueSheet, TxnSheet } from '../sheets'
 
 const RECENT_REVENUE = 7
 const RECENT_EXPENSES = 10
 
-type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense } | { type: 'handover' }
+type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string } } | { type: 'handover' }
 
 /** "Today" / "Yesterday" / "Friday", plus the date. */
 export function dayLabel(date: string, today: string): [string, string] {
@@ -32,6 +32,8 @@ export default function Home() {
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
   const summary = useFetch<{ summary: Totals; since: string | null }>(`${base}/summary`)
+  const [monthStart, monthEnd] = monthBounds(today)
+  const monthExp = useFetch<{ items: Expense[] }>(`${base}/expenses?from=${monthStart}&to=${monthEnd}`)
 
   const revenues = applyRevenueOps(rev.data?.revenue ?? [], overlayOps(shop.id, 'revenue', rev.loadedAt))
   const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), () => true).sort(newestFirst)
@@ -43,6 +45,14 @@ export default function Home() {
   const allExpenses = toPaise(all?.expenses) + sum(expenses) - sum(exp.data?.items ?? [])
   const allHandovers = toPaise(all?.handovers) + sum(handovers) - sum(ho.data?.items ?? [])
   const cash = allRevenue - allExpenses - allHandovers
+
+  // A monthly due is paid once any expense in its category is dated this month.
+  const paid = new Set(applyOps(monthExp.data?.items ?? [], overlayOps(shop.id, 'expense', monthExp.loadedAt),
+    (e) => e.date >= monthStart && e.date <= monthEnd).map((e) => e.categoryId))
+  const dues = !monthExp.data ? [] : (cats.data?.categories ?? [])
+    .filter((c) => c.active && c.dueDay && c.dueAmount && !paid.has(c.id))
+    .map((c) => ({ ...c, due: dayOfMonth(today, c.dueDay!) }))
+    .sort((a, b) => a.due.localeCompare(b.due))
   const since = summary.data?.since
   const offline = [rev, exp, summary].some((f) => f.error?.status === 0 && !f.data)
 
@@ -79,6 +89,24 @@ export default function Home() {
             <button className="action" onClick={() => setSheet({ type: 'expense' })}><i><CirclePlus size={21} strokeWidth={1.8} /></i>Add expense</button>
             <button className="action" onClick={() => setSheet({ type: 'handover' })}><i><Forward size={21} strokeWidth={1.8} /></i>Hand over</button>
           </div>
+
+          {dues.length > 0 && (
+            <>
+              <div className="sectionHead"><h2>Dues this month</h2><span className="count">{dues.length}</span></div>
+              <div className="list">
+                {dues.map((c) => (
+                  <button className="row" key={c.id} onClick={() => setSheet({ type: 'expense', prefill: { refId: c.id, amount: c.dueAmount! } })}>
+                    <span className="iconTile warm"><CalendarClock size={19} strokeWidth={1.7} /></span>
+                    <span className="rowCopy">
+                      <b>{c.name}{c.due < today && <span className="chip danger">Overdue</span>}</b>
+                      <small>{c.due === today ? 'Due today' : `Due ${fmtDate(c.due, { weekday: 'short', day: 'numeric', month: 'short' })}`} · Tap to pay</small>
+                    </span>
+                    <span className="amount">{inr(toPaise(c.dueAmount))}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <div>
@@ -128,7 +156,7 @@ export default function Home() {
 
       {sheet?.type === 'revenue' && <RevenueSheet shop={shop} date={sheet.date} onClose={() => setSheet(null)} />}
       {sheet?.type === 'expense' && (
-        <TxnSheet kind="expense" shop={shop} date={today} item={sheet.item} options={cats.data?.categories ?? []} onClose={() => setSheet(null)} />
+        <TxnSheet kind="expense" shop={shop} date={today} item={sheet.item} prefill={sheet.prefill} options={cats.data?.categories ?? []} onClose={() => setSheet(null)} />
       )}
       {sheet?.type === 'handover' && (
         <TxnSheet kind="handover" shop={shop} date={today} options={parts.data?.partners ?? []} onClose={() => setSheet(null)} />

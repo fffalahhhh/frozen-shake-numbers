@@ -262,22 +262,157 @@ func (a *app) deleteTxn(k txnKind) func(http.ResponseWriter, *http.Request, shop
 
 func (a *app) listCategories(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
 	rows, err := a.db.Query(r.Context(), `
-		SELECT id, name, is_default, active FROM expense_categories
+		SELECT id, name, is_default, active, due_amount::text, due_day FROM expense_categories
 		WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
 	if err != nil {
 		return err
 	}
 	type cat struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		IsDefault bool   `json:"isDefault"`
-		Active    bool   `json:"active"`
+		ID        string  `json:"id"`
+		Name      string  `json:"name"`
+		IsDefault bool    `json:"isDefault"`
+		Active    bool    `json:"active"`
+		DueAmount *string `json:"dueAmount"`
+		DueDay    *int32  `json:"dueDay"`
 	}
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[cat])
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, map[string]any{"categories": out})
+}
+
+// putDue sets a category's monthly due ({amount, day}) or clears it ({amount: null}).
+func (a *app) putDue(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Amount *Money
+		Day    *int
+	}
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	var amount any // nil clears the due
+	if in.Amount != nil {
+		if in.Amount.IsZero() {
+			return invalid("Amount must be more than ₹0")
+		}
+		if in.Day == nil || *in.Day < 1 || *in.Day > 31 {
+			return invalid("Due day must be 1–31")
+		}
+		amount = string(*in.Amount)
+	} else {
+		in.Day = nil
+	}
+	tag, err := a.db.Exec(r.Context(), `UPDATE expense_categories SET due_amount = $3, due_day = $4 WHERE id = $1 AND shop_id = $2`,
+		id, sc.ID, amount, in.Day)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errNotFound
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// ---------- Staff leave ----------
+// Staff are available by default; a row in staff_leaves marks one day off.
+
+func (a *app) listStaff(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	rows, err := a.db.Query(r.Context(), `SELECT id, name, active FROM staff WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
+	if err != nil {
+		return err
+	}
+	type staff struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Active bool   `json:"active"`
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[staff])
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"staff": out})
+}
+
+func (a *app) listLeaves(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	from, err := optDate(r, "from")
+	if err != nil {
+		return err
+	}
+	to, err := optDate(r, "to")
+	if err != nil {
+		return err
+	}
+	rows, err := a.db.Query(r.Context(), `
+		SELECT staff_id, leave_date::text, note FROM staff_leaves
+		WHERE shop_id = $1 AND ($2::date IS NULL OR leave_date >= $2) AND ($3::date IS NULL OR leave_date <= $3)
+		ORDER BY leave_date DESC LIMIT 1000`, sc.ID, from, to)
+	if err != nil {
+		return err
+	}
+	type leave struct {
+		StaffID string `json:"staffId"`
+		Date    string `json:"date"`
+		Note    string `json:"note"`
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[leave])
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"leaves": out})
+}
+
+// putLeave marks a staff member off on a date (upsert, so retries are safe).
+func (a *app) putLeave(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	date, err := parseDate(r.PathValue("date"))
+	if err != nil {
+		return err
+	}
+	var in struct{ Note string }
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	if in.Note, err = cleanNote(in.Note); err != nil {
+		return err
+	}
+	tag, err := a.db.Exec(r.Context(), `
+		INSERT INTO staff_leaves (shop_id, staff_id, leave_date, note, created_by)
+		SELECT shop_id, id, $3, $4, $5 FROM staff WHERE id = $1 AND shop_id = $2
+		ON CONFLICT (staff_id, leave_date) DO UPDATE SET note = EXCLUDED.note`, id, sc.ID, date, in.Note, sc.User.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errNotFound
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// deleteLeave is idempotent: the staff member is simply available that day.
+func (a *app) deleteLeave(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	date, err := parseDate(r.PathValue("date"))
+	if err != nil {
+		return err
+	}
+	if _, err := a.db.Exec(r.Context(), `DELETE FROM staff_leaves WHERE staff_id = $1 AND leave_date = $2 AND shop_id = $3`, id, date, sc.ID); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // listPartners includes each partner's handover total, optionally within ?from=&to=.

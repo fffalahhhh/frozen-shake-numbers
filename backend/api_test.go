@@ -230,3 +230,39 @@ func TestTenantIsolation(t *testing.T) {
 	anon.must(401, "POST", "/api/auth/login", map[string]any{"email": "alice@example.com", "password": "wrong-password"})
 	alice.must(200, "POST", "/api/auth/login", map[string]any{"email": "ALICE@example.com", "password": "password123"})
 }
+
+func TestDuesAndLeaves(t *testing.T) {
+	srv := newTestServer(t)
+	c := newClient(t, srv)
+	shop, cat, _ := c.signup("dues@example.com")
+	base := "/api/shops/" + shop
+
+	c.must(204, "PUT", base+"/categories/"+cat+"/due", map[string]any{"amount": "15000", "day": 5})
+	c.must(422, "PUT", base+"/categories/"+cat+"/due", map[string]any{"amount": "15000", "day": 32})
+	got := c.must(200, "GET", base+"/categories", nil)["categories"].([]any)[0].(map[string]any)
+	if got["dueAmount"] != "15000.00" || got["dueDay"] != float64(5) {
+		t.Errorf("due not saved: %v", got)
+	}
+	c.must(204, "PUT", base+"/categories/"+cat+"/due", map[string]any{"amount": nil})
+	if got := c.must(200, "GET", base+"/categories", nil)["categories"].([]any)[0].(map[string]any); got["dueDay"] != nil {
+		t.Errorf("due not cleared: %v", got)
+	}
+
+	staff := c.must(201, "POST", base+"/staff", map[string]any{"name": "Ravi"})["id"].(string)
+	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-10-20", map[string]any{"note": "Sick"})
+	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-10-20", map[string]any{}) // retry: no duplicate
+	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-11-02", map[string]any{})
+	if l := c.must(200, "GET", base+"/leaves?from=2026-10-01&to=2026-10-31", nil)["leaves"].([]any); len(l) != 1 {
+		t.Errorf("want 1 October leave, got %v", l)
+	}
+	c.must(204, "DELETE", base+"/staff/"+staff+"/leaves/2026-10-20", nil)
+	if l := c.must(200, "GET", base+"/leaves", nil)["leaves"].([]any); len(l) != 1 {
+		t.Errorf("want 1 leave left, got %v", l)
+	}
+
+	// Another shop can't touch this staff member.
+	bob := newClient(t, srv)
+	bShop, _, _ := bob.signup("bob-staff@example.com")
+	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/leaves/2026-10-21", map[string]any{})
+	bob.must(404, "PUT", "/api/shops/"+bShop+"/categories/"+cat+"/due", map[string]any{"amount": "1", "day": 1})
+}

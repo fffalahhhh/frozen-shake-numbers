@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Check, Download, LogOut, Plus, Smartphone, Store, User } from 'lucide-react'
-import { api, ApiError, useFetch, type Category, type Partner, type Shop } from '../api'
+import { api, ApiError, useFetch, type Category, type Partner, type Shop, type StaffMember } from '../api'
 import { useSession } from '../session'
 import { useSync } from '../sync'
 import { isIOS, isStandalone, useInstallPrompt } from '../pwa'
-import { PageHead, Skeleton, useConfirm } from '../ui'
+import { inr, isAmount, toPaise } from '../lib'
+import { MoneyInput, PageHead, Sheet, Skeleton, useConfirm, type SheetHandle } from '../ui'
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : 'Something went wrong')
 
@@ -13,15 +14,21 @@ export default function Settings() {
   const base = `/shops/${shop.id}`
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
+  const staff = useFetch<{ staff: StaffMember[] }>(`${base}/staff`)
+  const [due, setDue] = useState<Category | null>(null)
   return (
     <>
-      <PageHead eyebrow="Make it yours" title="Settings" sub="Shop details, expense categories and partners." />
+      <PageHead eyebrow="Make it yours" title="Settings" sub="Shop details, expense categories, partners and staff." />
       <div className="settingsGrid">
         <div>
           <NamedList
             title="Categories" addLabel="Add a category" placeholder="For example, packaging"
             items={cats.data?.categories} path={`${base}/categories`} reload={cats.reload}
-            sub={(c) => (c as Category).isDefault ? 'Default category' : 'Custom category'}
+            sub={(c) => {
+              const { dueAmount, dueDay, isDefault } = c as Category
+              return dueAmount ? `${inr(toPaise(dueAmount))} due on day ${dueDay} monthly` : isDefault ? 'Default category' : 'Custom category'
+            }}
+            extra={(c) => c.active && <button className="pill" onClick={() => setDue(c as Category)}>Due</button>}
             hideLabel="Hide" showLabel="Show" hiddenTitle="Hidden categories"
             hideNote="Hidden categories stay on past expenses but can’t be picked for new ones."
           />
@@ -32,6 +39,13 @@ export default function Settings() {
             hideLabel="Deactivate" showLabel="Reactivate" hiddenTitle="Inactive partners"
             hideNote="Past handovers keep the partner’s name even after renaming or deactivating."
           />
+          <NamedList
+            title="Staff" addLabel="Add staff" placeholder="Staff name"
+            items={staff.data?.staff} path={`${base}/staff`} reload={staff.reload}
+            sub={() => 'Available unless on leave'}
+            hideLabel="Deactivate" showLabel="Reactivate" hiddenTitle="Former staff"
+            hideNote="Record leaves on the Staff tab. Past leaves stay on record after deactivating."
+          />
         </div>
         <div>
           <ShopDetails key={shop.id} shop={shop} />
@@ -39,7 +53,52 @@ export default function Settings() {
           <AppSection />
         </div>
       </div>
+      {due && <DueSheet cat={due} path={`${base}/categories`} onSaved={cats.reload} onClose={() => setDue(null)} />}
     </>
+  )
+}
+
+/** Set or remove a category's monthly due (rent, electricity...). It shows on Home until paid. */
+function DueSheet({ cat, path, onSaved, onClose }: { cat: Category; path: string; onSaved: () => void; onClose: () => void }) {
+  const sheet = useRef<SheetHandle>(null)
+  const [amount, setAmount] = useState(cat.dueAmount ? String(Number(cat.dueAmount)) : '')
+  const [day, setDay] = useState(cat.dueDay ?? 1)
+  const [error, setError] = useState('')
+  const save = async (body: unknown) => {
+    try {
+      await api(`${path}/${cat.id}/due`, 'PUT', body)
+      onSaved()
+      sheet.current?.dismiss()
+    } catch (e) {
+      setError(errMsg(e))
+    }
+  }
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!isAmount(amount) || toPaise(amount) <= 0) return setError('Enter an amount more than ₹0, like 15000')
+    save({ amount: amount.trim(), day })
+  }
+  return (
+    <Sheet ref={sheet} open onClose={onClose} title={`${cat.name} · monthly due`}>
+      <form onSubmit={submit}>
+        <label className="field">
+          <span>Amount</span>
+          <MoneyInput value={amount} onChange={setAmount} autoFocus />
+        </label>
+        <label className="field">
+          <span>Due every month on day</span>
+          <select className="select" value={day} onChange={(e) => setDay(Number(e.target.value))}>
+            {Array.from({ length: 31 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}
+          </select>
+          <p className="hint">Shows on Home until an expense in {cat.name} is added that month. Days past the month’s end fall on its last day.</p>
+        </label>
+        {error && <p className="formError">{error}</p>}
+        <div className="sheetActions">
+          {cat.dueDay && <button type="button" className="btn danger" onClick={() => save({ amount: null })}>Remove due</button>}
+          <button className="btn big">Save due</button>
+        </div>
+      </form>
+    </Sheet>
   )
 }
 
@@ -47,7 +106,7 @@ type Named = { id: string; name: string; active: boolean }
 
 function NamedList(props: {
   title: string; addLabel: string; placeholder: string; items?: Named[]; path: string; reload: () => void
-  sub: (i: Named) => string; hideLabel: string; showLabel: string; hiddenTitle: string; hideNote: string
+  sub: (i: Named) => string; extra?: (i: Named) => ReactNode; hideLabel: string; showLabel: string; hiddenTitle: string; hideNote: string
 }) {
   const { items, path, reload } = props
   const [name, setName] = useState('')
@@ -86,6 +145,7 @@ function NamedList(props: {
         <>
           <span className="rowCopy"><b>{i.name}</b><small>{i.active ? props.sub(i) : 'Not shown when adding'}</small></span>
           <span className="rowBtns">
+            {props.extra?.(i)}
             <button className="pill" onClick={() => setEditing({ id: i.id, name: i.name })}>Rename</button>
             <button className="pill" onClick={() => run(() => api(`${path}/${i.id}`, 'PUT', { active: !i.active }))}>
               {i.active ? props.hideLabel : props.showLabel}
@@ -145,7 +205,7 @@ function ShopDetails({ shop }: { shop: Shop }) {
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${shop.name}?`,
-      message: 'This permanently deletes the shop and all of its revenue, expenses, handovers, categories and partners. This can’t be undone.',
+      message: 'This permanently deletes the shop and all of its revenue, expenses, handovers, categories, partners, staff and leaves. This can’t be undone.',
       confirm: 'Delete shop',
     })
     if (!ok) return
