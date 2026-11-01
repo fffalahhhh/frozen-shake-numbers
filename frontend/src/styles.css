@@ -280,6 +280,16 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   transition: background .2s, box-shadow .2s;
 }
 .seg button.on { background: var(--card); font-weight: 600; box-shadow: 0 3px 8px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04); }
+.hero .seg { background: rgba(255,255,255,.12); margin: 14px 0 4px; }
+.hero .seg button { color: var(--on-hero); }
+.hero .seg button.on { background: rgba(255,255,255,.92); color: var(--hero); box-shadow: none; }
+.splitRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.splitRow .field { margin-bottom: 6px; }
+.splitRow + .hint { margin: 0 0 14px; }
+.field .seg { margin: 0; }
+.field .seg button { padding: 10px 6px; font-size: 14px; }
+.field .seg button.on { background: var(--primary); color: var(--on-primary, #fff); }
+.splitRow .money input { font-size: 19px; min-height: 54px; }
 
 /* Date field: looks the same everywhere, opens the native picker. */
 .dateField {

@@ -110,8 +110,8 @@ func TestCashInHand(t *testing.T) {
 
 	c.must(200, "PUT", base+"/revenue/"+day, map[string]any{"amount": "3000"})
 	c.must(200, "PUT", base+"/revenue/"+day, map[string]any{"amount": 4000}) // update, not duplicate
-	if rev := c.must(200, "GET", base+"/revenue?from="+day+"&to="+day, nil)["revenue"].([]any); len(rev) != 1 {
-		t.Fatalf("want 1 revenue row, got %d", len(rev))
+	if rev := c.must(200, "GET", base+"/revenue?from="+day+"&to="+day, nil)["revenue"].([]any); len(rev) != 1 || rev[0].(map[string]any)["cash"] != "4000.00" {
+		t.Fatalf("want 1 revenue row, all cash ({amount} predates the split), got %v", rev)
 	}
 
 	exp := map[string]any{"id": "7f9c2ba4-e88f-4a6b-9b1a-2f1e6d1c0a01", "date": day, "amount": "820.50", "categoryId": cat, "note": "Fruit"}
@@ -121,11 +121,19 @@ func TestCashInHand(t *testing.T) {
 	c.must(201, "POST", base+"/handovers", map[string]any{"date": day, "amount": "500", "partnerId": partner})
 
 	// A later day that spends more than it earns: cash in hand carries over.
-	c.must(200, "PUT", base+"/revenue/2026-10-14", map[string]any{"amount": "1000"})
+	// Revenue is split, and the big expense is paid online.
+	rv := c.must(200, "PUT", base+"/revenue/2026-10-14", map[string]any{"cash": "600", "online": "400"})["revenue"].(map[string]any)
+	if rv["amount"] != "1000.00" || rv["cash"] != "600.00" || rv["online"] != "400.00" {
+		t.Fatalf("split revenue = %v", rv)
+	}
 	if rev := c.must(200, "GET", base+"/revenue?limit=1", nil)["revenue"].([]any); len(rev) != 1 || rev[0].(map[string]any)["date"] != "2026-10-14" {
 		t.Fatalf("limit=1 should return only the latest day, got %v", rev)
 	}
-	c.must(201, "POST", base+"/expenses", map[string]any{"date": "2026-10-14", "amount": "3000", "categoryId": cat})
+	c.must(201, "POST", base+"/expenses", map[string]any{"date": "2026-10-14", "amount": "3000", "categoryId": cat, "method": "online"})
+	c.must(422, "POST", base+"/expenses", map[string]any{"date": day, "amount": "1", "categoryId": cat, "method": "card"})
+	if items := c.must(200, "GET", base+"/expenses?method=online", nil)["items"].([]any); len(items) != 1 || items[0].(map[string]any)["method"] != "online" {
+		t.Errorf("online expenses = %v", items)
+	}
 	// An earlier month, so October opens with a balance.
 	c.must(200, "PUT", base+"/revenue/2026-09-30", map[string]any{"amount": "100"})
 
@@ -161,6 +169,20 @@ func TestCashInHand(t *testing.T) {
 	if sum["since"] != "2026-09-30" {
 		t.Errorf("since = %v", sum["since"])
 	}
+	// Per method: cash 4700 − 1050 − 500, online 400 − 3000. They add up to the total.
+	if got := sum["cash"].(map[string]any)["cashInHand"]; got != "3150.00" {
+		t.Errorf("cash in hand = %v, want 3150.00", got)
+	}
+	if got := sum["online"].(map[string]any)["cashInHand"]; got != "-2600.00" {
+		t.Errorf("online balance = %v, want -2600.00", got)
+	}
+
+	// History filtered to online: only the day with online activity.
+	oh := c.must(200, "GET", base+"/history?from=2026-10-01&to=2026-10-31&method=online", nil)
+	if od := oh["days"].([]any); len(od) != 1 || od[0].(map[string]any)["revenue"] != "400.00" || od[0].(map[string]any)["balance"] != "-2600.00" {
+		t.Errorf("online history = %v", od)
+	}
+	c.must(422, "GET", base+"/history?from=2026-10-01&to=2026-10-31&method=card", nil)
 
 	// Validation: negative / zero / too precise amounts are rejected.
 	for _, amt := range []any{"-5", 0, "1.234", "abc"} {

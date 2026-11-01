@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useFetch, type HistoryDay, type Shop } from '../api'
 import { useSession } from '../session'
-import { addMonths, fmtDate, inr, monthBounds, toPaise, todayIn } from '../lib'
-import { DateField, Empty, PageHead, Skeleton } from '../ui'
-import { dayLabel } from './Today'
+import { addMonths, fmtDate, inr, monthBounds, toPaise, todayIn, type Method } from '../lib'
+import { DateField, Empty, MethodSeg, PageHead, Skeleton } from '../ui'
+import { dayLabel, inHandLabel, methodLabel } from './Today'
 
 type Totals = { revenue: string; expenses: string; handovers: string; net: string; openingBalance: string; closingBalance: string }
 type Mode = 'all' | 'month' | 'range'
@@ -18,9 +18,10 @@ export default function History() {
   const [mode, setMode] = useState<Mode>('all')
   const [month, setMonth] = useState(thisMonth)
   const [range, setRange] = useState({ from: thisMonth, to: today })
+  const [method, setMethod] = useState<Method | ''>('')
 
   const [from, to] = mode === 'all' ? ['2000-01-01', today] : mode === 'month' ? monthBounds(month) : [range.from, range.to]
-  const { data, loading, error, reload } = useFetch<{ days: HistoryDay[]; totals: Totals }>(`/shops/${shop.id}/history?from=${from}&to=${to}`)
+  const { data, loading, error, reload } = useFetch<{ days: HistoryDay[]; totals: Totals }>(`/shops/${shop.id}/history?from=${from}&to=${to}${method ? `&method=${method}` : ''}`)
   const days = data?.days ?? []
 
   return (
@@ -28,10 +29,12 @@ export default function History() {
       <PageHead eyebrow="Your records" title="History" sub="Every day you’ve recorded. Open a day to see and edit all of its entries." />
 
       <div className="seg" role="tablist">
-        {([['all', 'All'], ['month', 'By month'], ['range', 'Date range']] as const).map(([k, label]) => (
+        {([['all', 'All time'], ['month', 'By month'], ['range', 'Date range']] as const).map(([k, label]) => (
           <button key={k} role="tab" aria-selected={mode === k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{label}</button>
         ))}
       </div>
+
+      <MethodSeg value={method} onChange={setMethod} all />
 
       {mode === 'month' && (
         <div className="monthBar">
@@ -52,7 +55,7 @@ export default function History() {
           <div><span>Revenue</span><b>{inr(toPaise(data.totals.revenue))}</b></div>
           <div><span>Expenses</span><b>{inr(toPaise(data.totals.expenses))}</b></div>
           <div><span>Handed over</span><b>{inr(toPaise(data.totals.handovers))}</b></div>
-          <div><span>{mode === 'all' ? 'Cash in hand' : 'In hand at end'}</span><b>{inr(toPaise(data.totals.closingBalance))}</b></div>
+          <div><span>{inHandLabel[method]}{mode === 'all' ? '' : ' at end'}</span><b>{inr(toPaise(data.totals.closingBalance))}</b></div>
         </div>
       )}
 
@@ -61,7 +64,7 @@ export default function History() {
       {error && !data ? (
         <div className="banner danger"><span className="grow">{error.status === 0 ? 'You’re offline and this period isn’t saved on this device yet.' : error.message}</span><button className="pill" onClick={reload}>Retry</button></div>
       ) : loading && !data ? <Skeleton rows={4} /> : days.length === 0 ? (
-        <Empty icon={CalendarDays} title="Your history starts here" text="Each day you record revenue, expenses or a partner handover will appear here." />
+        <Empty icon={CalendarDays} title={method ? `No ${methodLabel[method]}entries in this period` : 'Your history starts here'} text="Each day you record revenue, expenses or a partner handover will appear here." />
       ) : (
         <>
           <div className="histHead"><span>Date</span><span className="figs"><span>Revenue</span><span>Expenses</span><span>Handed over</span><span>In hand</span></span></div>

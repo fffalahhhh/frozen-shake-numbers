@@ -158,10 +158,12 @@ export function applyOps<T extends { id: string; pending?: boolean; failed?: boo
 }
 
 /** Apply pending revenue changes (one total per date) to a fetched list, newest date first. */
-export function applyRevenueOps<T extends { date: string; amount: string; pending?: boolean; failed?: boolean }>(items: T[], ops: Op[]): T[] {
+export function applyRevenueOps<T extends { date: string; amount: string; cash?: string; online?: string; pending?: boolean; failed?: boolean }>(items: T[], ops: Op[]): T[] {
   const byDate = new Map(items.map((i) => [i.date, i]))
   for (const op of ops) {
-    if (op.action === 'put') byDate.set(op.targetId, { ...byDate.get(op.targetId), date: op.targetId, amount: op.body!.amount, pending: !op.syncedAt, failed: !!op.error } as T)
+    // cash/online are absent on ops queued before the split; `part()` then counts it all as cash.
+    const { amount, cash, online } = op.body ?? {}
+    if (op.action === 'put') byDate.set(op.targetId, { ...byDate.get(op.targetId), date: op.targetId, amount, cash, online, pending: !op.syncedAt, failed: !!op.error } as T)
   }
   return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date))
 }

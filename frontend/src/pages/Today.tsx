@@ -4,12 +4,15 @@ import { Banknote, CalendarClock, CirclePlus, Forward, ReceiptText, TrendingUp, 
 import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
-import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, sum, toPaise, todayIn } from '../lib'
-import { Empty, Skeleton, Status } from '../ui'
+import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, part, sumPart, toPaise, todayIn, type Method } from '../lib'
+import { Empty, MethodSeg, MethodTag, Skeleton, Status } from '../ui'
 import { RevenueSheet, TxnSheet } from '../sheets'
 
 const RECENT_REVENUE = 7
 const RECENT_EXPENSES = 10
+
+export const methodLabel = { '': '', cash: 'cash ', online: 'online ' }
+export const inHandLabel = { '': 'Total in hand', cash: 'Cash in hand', online: 'Online balance' }
 
 type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string } } | { type: 'handover' }
 
@@ -23,27 +26,29 @@ export default function Home() {
   const shop = useSession().shop as Shop
   const today = todayIn(shop.timezone)
   const [sheet, setSheet] = useState<SheetState>(null)
+  const [tab, setTab] = useState<Method | ''>('')
   useSync() // re-render when queued changes come and go
 
   const base = `/shops/${shop.id}`
   const rev = useFetch<{ revenue: Revenue[] }>(`${base}/revenue?limit=${RECENT_REVENUE}`)
-  const exp = useFetch<{ items: Expense[] }>(`${base}/expenses?limit=${RECENT_EXPENSES}`)
+  const exp = useFetch<{ items: Expense[] }>(`${base}/expenses?limit=${RECENT_EXPENSES}${tab ? `&method=${tab}` : ''}`)
   const ho = useFetch<{ items: Handover[] }>(`${base}/handovers?limit=10`) // only to reflect unsynced handovers in the totals
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
-  const summary = useFetch<{ summary: Totals; since: string | null }>(`${base}/summary`)
+  const summary = useFetch<{ summary: Totals; cash: Totals; online: Totals; since: string | null }>(`${base}/summary`)
   const [monthStart, monthEnd] = monthBounds(today)
   const monthExp = useFetch<{ items: Expense[] }>(`${base}/expenses?from=${monthStart}&to=${monthEnd}`)
 
+  const shown = (x: Parameters<typeof part>[0]) => !tab || part(x, tab) > 0
   const revenues = applyRevenueOps(rev.data?.revenue ?? [], overlayOps(shop.id, 'revenue', rev.loadedAt))
-  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), () => true).sort(newestFirst)
+  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), shown).sort(newestFirst)
   const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), () => true)
 
-  // All-time totals from the server, adjusted for changes that haven't synced yet.
-  const all = summary.data?.summary
-  const allRevenue = toPaise(all?.revenue) + sum(revenues) - sum(rev.data?.revenue ?? [])
-  const allExpenses = toPaise(all?.expenses) + sum(expenses) - sum(exp.data?.items ?? [])
-  const allHandovers = toPaise(all?.handovers) + sum(handovers) - sum(ho.data?.items ?? [])
+  // All-time totals from the server (for the chosen tab), adjusted for changes that haven't synced yet.
+  const all = summary.data?.[tab || 'summary']
+  const allRevenue = toPaise(all?.revenue) + sumPart(revenues, tab) - sumPart(rev.data?.revenue ?? [], tab)
+  const allExpenses = toPaise(all?.expenses) + sumPart(expenses, tab) - sumPart(exp.data?.items ?? [], tab)
+  const allHandovers = toPaise(all?.handovers) + sumPart(handovers, tab) - sumPart(ho.data?.items ?? [], tab)
   const cash = allRevenue - allExpenses - allHandovers
 
   // A monthly due is paid once any expense in its category is dated this month.
@@ -71,11 +76,12 @@ export default function Home() {
           <section className="hero" aria-label="All-time cash summary">
             <div className="top">
               <span>
-                <span className="label">Cash in hand</span>
+                <span className="label">{inHandLabel[tab]}</span>
                 <small className="since">{since ? `All time · since ${fmtDate(since, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'All time'}</small>
               </span>
               <span className="wallet"><Wallet size={22} strokeWidth={1.7} /></span>
             </div>
+            <MethodSeg value={tab} onChange={setTab} all />
             <strong className={cash < 0 ? 'neg' : ''}>{inr(cash)}</strong>
             <div className="heroCards">
               <div><span>Revenue</span><b>{inr(allRevenue)}</b></div>
@@ -114,17 +120,17 @@ export default function Home() {
             <h2>Recent revenue</h2>
             <Link className="link" to="/history">See all</Link>
           </div>
-          {rev.loading && !rev.data ? <Skeleton rows={2} /> : revenues.length === 0
-            ? <Empty icon={Banknote} title="No revenue yet" text="Tap Add revenue to record today’s total cash sales." />
+          {rev.loading && !rev.data ? <Skeleton rows={2} /> : revenues.filter(shown).length === 0
+            ? <Empty icon={Banknote} title={`No ${methodLabel[tab]}revenue yet`} text="Tap Add revenue to record today’s cash and online sales." />
             : (
               <div className="list">
-                {revenues.slice(0, RECENT_REVENUE).map((r) => {
+                {revenues.slice(0, RECENT_REVENUE).filter(shown).map((r) => {
                   const [name, date] = dayLabel(r.date, today)
                   return (
                     <button className="row" key={r.date} onClick={() => setSheet({ type: 'revenue', date: r.date })}>
                       <span className="iconTile"><Banknote size={20} strokeWidth={1.7} /></span>
-                      <span className="rowCopy"><b>{name}<Status item={r} /></b><small>{date}</small></span>
-                      <span className="amount pos">{inr(toPaise(r.amount))}</span>
+                      <span className="rowCopy"><b>{name}<Status item={r} /></b><small>{tab ? date : `Cash ${inr(part(r, 'cash'))} · Online ${inr(part(r, 'online'))}`}</small></span>
+                      <span className="amount pos">{inr(part(r, tab))}</span>
                     </button>
                   )
                 })}
@@ -136,14 +142,14 @@ export default function Home() {
             <Link className="link" to="/history">See all</Link>
           </div>
           {exp.loading && !exp.data ? <Skeleton /> : expenses.length === 0
-            ? <Empty icon={ReceiptText} title="No expenses yet" text="Add shop stock, utilities or another expense to keep your cash total accurate." />
+            ? <Empty icon={ReceiptText} title={`No ${methodLabel[tab]}expenses yet`} text="Add shop stock, utilities or another expense to keep your cash total accurate." />
             : (
               <div className="list">
                 {expenses.slice(0, RECENT_EXPENSES).map((e) => (
                   <button className="row" key={e.id} onClick={() => setSheet({ type: 'expense', item: e })}>
                     <span className="iconTile soft"><ReceiptText size={19} strokeWidth={1.7} /></span>
                     <span className="rowCopy">
-                      <b>{e.categoryName}<Status item={e} /></b>
+                      <b>{e.categoryName}<MethodTag item={e} /><Status item={e} /></b>
                       <small>{dayLabel(e.date, today)[0]}, {fmtDate(e.date, { day: 'numeric', month: 'short' })}{e.note ? ` · ${e.note}` : ''}</small>
                     </span>
                     <span className="amount">−{inr(toPaise(e.amount))}</span>

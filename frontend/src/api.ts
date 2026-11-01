@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSync } from './sync'
+import type { Method } from './lib'
 
 export type User = { id: string; email: string; name: string; defaultShopId: string | null }
 export type Shop = { id: string; name: string; address: string; timezone: string; role: 'owner' | 'member'; isDefault: boolean }
@@ -7,8 +8,8 @@ export type Category = { id: string; name: string; isDefault: boolean; active: b
 export type StaffMember = { id: string; name: string; active: boolean }
 export type Leave = { staffId: string; date: string; note: string }
 export type Partner = { id: string; name: string; active: boolean; totalHandedOver: string; handoverCount: number }
-export type Revenue = { date: string; amount: string; pending?: boolean; failed?: boolean }
-type TxnBase = { id: string; date: string; amount: string; note: string; createdAt?: string; pending?: boolean; failed?: boolean }
+export type Revenue = { date: string; amount: string; cash: string; online: string; pending?: boolean; failed?: boolean }
+type TxnBase = { id: string; date: string; amount: string; method?: Method; note: string; createdAt?: string; pending?: boolean; failed?: boolean }
 export type Expense = TxnBase & { categoryId: string; categoryName: string }
 export type Handover = TxnBase & { partnerId: string; partnerName: string }
 export type HistoryDay = { date: string; revenue: string; expenses: string; handovers: string; net: string; balance: string }

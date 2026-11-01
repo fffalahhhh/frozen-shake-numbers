@@ -65,23 +65,31 @@ reset tokens are 256-bit random values, and only their SHA-256 hashes are stored
 | `PUT /shops/{shopId}` | Any of `{name, address, timezone}` (owner only) and `{isDefault}` (any member; this is a per-user preference) |
 | `DELETE /shops/{shopId}` | Owner only. Permanently deletes the shop and all of its records |
 
-## Revenue (one total per day)
+## Cash & online
+
+Every figure is split by how it was paid. A day's revenue has a `cash` and an
+`online` part (`amount` is their total). Each expense and handover has a
+`method` of `cash` (the default) or `online`. Records from before the split are
+all cash. List, partner and history endpoints take `?method=cash|online` to
+show only one side.
+
+## Revenue (one entry per day, split into cash + online)
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/revenue?from=&to=&limit=` | `{revenue: [{date, amount, updatedAt}]}`, newest date first (`limit` for "recent") |
-| `PUT /shops/{shopId}/revenue/{date}` | `{amount}` → `{revenue: {date, amount, updatedAt}}` (upsert) |
+| `GET /shops/{shopId}/revenue?from=&to=&limit=` | `{revenue: [{date, amount, cash, online, updatedAt}]}`, newest date first (`limit` for "recent") |
+| `PUT /shops/{shopId}/revenue/{date}` | `{cash?, online?}` (a missing part is 0) → `{revenue: {date, amount, cash, online, updatedAt}}` (upsert). The old `{amount}` is still accepted and stored as cash |
 
 ## Expenses
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/expenses?from=&to=&categoryId=&limit=` | `{items: [Expense]}`, newest first, up to 500 |
-| `POST /shops/{shopId}/expenses` | `{id?, date, amount, categoryId, note?}` → `201 {item}` (or `200` on replay) |
-| `PUT /shops/{shopId}/expenses/{id}` | `{date, amount, categoryId, note?}` → `{item}` |
+| `GET /shops/{shopId}/expenses?from=&to=&categoryId=&method=&limit=` | `{items: [Expense]}`, newest first, up to 500 |
+| `POST /shops/{shopId}/expenses` | `{id?, date, amount, method?, categoryId, note?}` → `201 {item}` (or `200` on replay) |
+| `PUT /shops/{shopId}/expenses/{id}` | `{date, amount, method?, categoryId, note?}` → `{item}` |
 | `DELETE /shops/{shopId}/expenses/{id}` | `204` |
 
-`Expense = {id, date, amount, categoryId, categoryName, note, createdAt, updatedAt}`.
+`Expense = {id, date, amount, method, categoryId, categoryName, note, createdAt, updatedAt}`.
 `categoryName` is copied onto the expense when it's created. It keeps the
 original name if the category is later renamed or hidden, and only changes if
 you move the expense to a different category.
@@ -92,9 +100,9 @@ Same shape as expenses, with `partnerId` / `partnerName` in place of the categor
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/handovers?from=&to=&partnerId=&limit=` | `{items: [Handover]}` |
-| `POST /shops/{shopId}/handovers` | `{id?, date, amount, partnerId, note?}` |
-| `PUT /shops/{shopId}/handovers/{id}` | `{date, amount, partnerId, note?}` |
+| `GET /shops/{shopId}/handovers?from=&to=&partnerId=&method=&limit=` | `{items: [Handover]}` |
+| `POST /shops/{shopId}/handovers` | `{id?, date, amount, method?, partnerId, note?}` |
+| `PUT /shops/{shopId}/handovers/{id}` | `{date, amount, method?, partnerId, note?}` |
 | `DELETE /shops/{shopId}/handovers/{id}` | `204` |
 
 ## Categories & partners
@@ -140,11 +148,16 @@ Entries are still dated, but a single day doesn't need to balance on its own.
 ```json
 {
   "summary": { "revenue": "353375.00", "expenses": "330878.00", "handovers": "13205.00", "cashInHand": "9292.00" },
+  "cash":    { "revenue": "203375.00", "expenses": "180878.00", "handovers": "13205.00", "cashInHand": "9292.00" },
+  "online":  { "revenue": "150000.00", "expenses": "150000.00", "handovers": "0.00", "cashInHand": "0.00" },
   "since": "2026-10-03"
 }
 ```
 
-`GET /shops/{shopId}/history?from=YYYY-MM-DD&to=YYYY-MM-DD` (both required)
+`cash` and `online` are the same totals for each side. Their `cashInHand`
+values add up to the overall one: cash in the drawer and the online balance.
+
+`GET /shops/{shopId}/history?from=YYYY-MM-DD&to=YYYY-MM-DD&method=` (`from`/`to` required; `method` optional, limits every figure and balance to that side)
 
 ```json
 {

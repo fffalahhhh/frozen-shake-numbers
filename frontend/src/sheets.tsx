@@ -1,44 +1,60 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop } from './api'
-import { inr, isAmount, toPaise, todayIn, uuid } from './lib'
+import { fromPaise, inr, isAmount, part, toPaise, todayIn, uuid, type Method } from './lib'
 import { enqueue, overlayOps } from './sync'
-import { DateField, MoneyInput, Sheet, useConfirm, type SheetHandle } from './ui'
+import { DateField, MethodSeg, MoneyInput, Sheet, useConfirm, type SheetHandle } from './ui'
 
-/** Set the day's revenue total. Picking a date loads that day's current total. */
+/** Set the day's revenue, split into cash and online. Picking a date loads that day's current figures. */
 export function RevenueSheet({ shop, date: initial, onClose }: { shop: Shop; date: string; onClose: () => void }) {
   const sheet = useRef<SheetHandle>(null)
   const today = todayIn(shop.timezone)
   const [date, setDate] = useState(initial)
-  const [amount, setAmount] = useState('')
+  const [cash, setCash] = useState('')
+  const [online, setOnline] = useState('')
   const [typed, setTyped] = useState(false)
   const [error, setError] = useState('')
   const existing = useFetch<{ revenue: Revenue[] }>(`/shops/${shop.id}/revenue?from=${date}&to=${date}`)
   const pending = overlayOps(shop.id, 'revenue', existing.loadedAt).filter((o) => o.targetId === date).at(-1)
-  const current: string | undefined = pending?.body?.amount ?? existing.data?.revenue[0]?.amount
+  const current: Partial<Revenue> | undefined = (pending?.body as Revenue | undefined) ?? existing.data?.revenue[0]
+  const curCash = current ? part(current as Revenue, 'cash') : 0
+  const curOnline = current ? part(current as Revenue, 'online') : 0
 
-  // Prefill with the chosen day's total until the user types their own amount.
+  // Prefill with the chosen day's figures until the user types their own.
   useEffect(() => {
-    if (!typed) setAmount(current && toPaise(current) ? String(Number(current)) : '')
-  }, [current, typed])
+    if (typed) return
+    setCash(curCash ? String(curCash / 100) : '')
+    setOnline(curOnline ? String(curOnline / 100) : '')
+  }, [curCash, curOnline, typed])
 
+  const total = (isAmount(cash) ? toPaise(cash) : 0) + (isAmount(online) ? toPaise(online) : 0)
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (!isAmount(amount)) return setError('Enter an amount like 4000 or 4000.50')
-    enqueue({ shopId: shop.id, kind: 'revenue', action: 'put', targetId: date, body: { amount: amount.trim() } })
+    const c = cash.trim() || '0', o = online.trim() || '0'
+    if (!cash.trim() && !online.trim()) return setError('Enter the cash or online amount')
+    if (!isAmount(c) || !isAmount(o)) return setError('Enter amounts like 4000 or 4000.50')
+    enqueue({ shopId: shop.id, kind: 'revenue', action: 'put', targetId: date, body: { cash: c, online: o, amount: fromPaise(total) } })
     sheet.current?.dismiss()
   }
+  const type = (set: (v: string) => void) => (v: string) => { setTyped(true); set(v) }
   return (
     <Sheet ref={sheet} open onClose={onClose} title="Daily revenue">
       <form onSubmit={submit}>
-        <label className="field">
-          <span>Total cash sales</span>
-          <MoneyInput value={amount} onChange={(v) => { setTyped(true); setAmount(v) }} autoFocus />
-        </label>
+        <div className="splitRow">
+          <label className="field">
+            <span>Cash</span>
+            <MoneyInput value={cash} onChange={type(setCash)} autoFocus required={false} label="Cash sales in rupees" />
+          </label>
+          <label className="field">
+            <span>Online</span>
+            <MoneyInput value={online} onChange={type(setOnline)} required={false} label="Online sales in rupees" />
+          </label>
+        </div>
+        <p className="hint">Total {inr(total)}</p>
         <label className="field">
           <span>Date</span>
           <DateField value={date} max={today} onChange={setDate} />
-          <p className="hint">{current !== undefined ? `This day already has ${inr(toPaise(current))}. Saving replaces it.` : 'One total for the day.'}</p>
+          <p className="hint">{current !== undefined ? `This day already has ${inr(curCash)} cash + ${inr(curOnline)} online. Saving replaces it.` : 'One total for the day.'}</p>
         </label>
         {error && <p className="formError">{error}</p>}
         <button className="btn block big">Save revenue</button>
@@ -68,6 +84,7 @@ export function TxnSheet(props: TxnProps) {
   const choices = options.filter((o) => o.active || o.id === currentRef)
   const [refId, setRefId] = useState(currentRef || props.prefill?.refId || (kind === 'handover' ? '' : choices[0]?.id ?? ''))
   const [amount, setAmount] = useState(item ? String(Number(item.amount)) : props.prefill ? String(Number(props.prefill.amount)) : '')
+  const [method, setMethod] = useState<Method>(item?.method ?? 'cash')
   const [note, setNote] = useState(item?.note ?? '')
   const [date, setDate] = useState(item?.date ?? props.date)
   const [error, setError] = useState('')
@@ -80,7 +97,7 @@ export function TxnSheet(props: TxnProps) {
     const ref = choices.find((c) => c.id === refId)!
     // Keep the original snapshot name when the reference didn't change (matches the server).
     const refName = item && refId === currentRef ? (item as any)[`${refKey}Name`] : ref.name
-    const body = { date, amount: amount.trim(), note: note.trim(), [`${refKey}Id`]: refId, [`${refKey}Name`]: refName }
+    const body = { date, amount: amount.trim(), method, note: note.trim(), [`${refKey}Id`]: refId, [`${refKey}Name`]: refName }
     enqueue(item
       ? { shopId: shop.id, kind, action: 'update', targetId: item.id, body }
       : { shopId: shop.id, kind, action: 'create', targetId: uuid(), body: { ...body, createdAt: new Date().toISOString() } })
@@ -106,6 +123,10 @@ export function TxnSheet(props: TxnProps) {
           <span>Amount</span>
           <MoneyInput value={amount} onChange={setAmount} autoFocus={!item} />
         </label>
+        <div className="field">
+          <span>Paid by</span>
+          <MethodSeg value={method} onChange={setMethod} />
+        </div>
         <label className="field">
           <span>{label}</span>
           <select className="select" value={refId} onChange={(e) => setRefId(e.target.value)} required>

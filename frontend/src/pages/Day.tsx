@@ -4,8 +4,8 @@ import { Banknote, ChevronLeft, ChevronRight, Forward, ReceiptText, Users } from
 import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
-import { addDays, inr, newestFirst, sum, toPaise, todayIn } from '../lib'
-import { Empty, openPicker, Skeleton, Status } from '../ui'
+import { addDays, inr, newestFirst, part, sum, toPaise, todayIn, type Method } from '../lib'
+import { Empty, MethodSeg, MethodTag, openPicker, Skeleton, Status } from '../ui'
 import { RevenueSheet, TxnSheet } from '../sheets'
 import { dayLabel } from './Today'
 
@@ -18,6 +18,7 @@ export default function Day() {
   const navigate = useNavigate()
   const today = todayIn(shop.timezone)
   const [sheet, setSheet] = useState<SheetState>(null)
+  const [method, setMethod] = useState<Method | ''>('')
   useSync()
 
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -31,8 +32,8 @@ export default function Day() {
   if (!valid) return <Navigate to="/history" replace />
 
   const revenue = applyRevenueOps(rev.data?.revenue ?? [], overlayOps(shop.id, 'revenue', rev.loadedAt)).find((r) => r.date === date)
-  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), (i) => i.date === date).sort(newestFirst)
-  const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), (i) => i.date === date).sort(newestFirst)
+  const expenses = applyOps(exp.data?.items ?? [], overlayOps(shop.id, 'expense', exp.loadedAt), (i) => i.date === date && (!method || part(i, method) > 0)).sort(newestFirst)
+  const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt), (i) => i.date === date && (!method || part(i, method) > 0)).sort(newestFirst)
   const loading = [rev, exp, ho].some((f) => f.loading && !f.data)
   const offline = [rev, exp, ho].some((f) => f.error?.status === 0 && !f.data)
   const go = (d: string) => navigate(`/history/${d}`, { replace: true })
@@ -54,8 +55,10 @@ export default function Day() {
 
       {offline && <div className="banner warn"><span className="grow">You’re offline and this day isn’t saved on this device yet. Anything you add will sync later.</span></div>}
 
+      <MethodSeg value={method} onChange={setMethod} all />
+
       <div className="totals" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div><span>Revenue</span><b>{inr(toPaise(revenue?.amount))}</b></div>
+        <div><span>Revenue</span><b>{inr(revenue ? part(revenue, method) : 0)}</b></div>
         <div><span>Spent</span><b>{inr(sum(expenses))}</b></div>
         <div><span>Handed over</span><b>{inr(sum(handovers))}</b></div>
       </div>
@@ -66,10 +69,10 @@ export default function Day() {
           <button className="row" onClick={() => setSheet({ type: 'revenue' })}>
             <span className="iconTile"><Banknote size={20} strokeWidth={1.7} /></span>
             <span className="rowCopy">
-              <b>Cash sales{revenue && <Status item={revenue} />}</b>
-              <small>{revenue ? 'One total for the day' : 'Not entered · tap to add'}</small>
+              <b>Sales{revenue && <Status item={revenue} />}</b>
+              <small>{revenue ? `Cash ${inr(part(revenue, 'cash'))} · Online ${inr(part(revenue, 'online'))}` : 'Not entered · tap to add'}</small>
             </span>
-            <span className="amount pos">{inr(toPaise(revenue?.amount))}</span>
+            <span className="amount pos">{inr(revenue ? part(revenue, method) : 0)}</span>
           </button>
         </div>
       )}
@@ -85,7 +88,7 @@ export default function Day() {
             {expenses.map((e) => (
               <button className="row" key={e.id} onClick={() => setSheet({ type: 'expense', item: e })}>
                 <span className="iconTile soft"><ReceiptText size={19} strokeWidth={1.7} /></span>
-                <span className="rowCopy"><b>{e.categoryName}<Status item={e} /></b><small>{e.note || 'No note'}</small></span>
+                <span className="rowCopy"><b>{e.categoryName}<MethodTag item={e} /><Status item={e} /></b><small>{e.note || 'No note'}</small></span>
                 <span className="amount">−{inr(toPaise(e.amount))}</span>
               </button>
             ))}
@@ -103,7 +106,7 @@ export default function Day() {
             {handovers.map((h) => (
               <button className="row" key={h.id} onClick={() => setSheet({ type: 'handover', item: h })}>
                 <span className="iconTile warm"><Forward size={19} strokeWidth={1.7} /></span>
-                <span className="rowCopy"><b>{h.partnerName}<Status item={h} /></b><small>{h.note || 'Cash handed over'}</small></span>
+                <span className="rowCopy"><b>{h.partnerName}<MethodTag item={h} /><Status item={h} /></b><small>{h.note || 'Cash handed over'}</small></span>
                 <span className="amount">−{inr(toPaise(h.amount))}</span>
               </button>
             ))}

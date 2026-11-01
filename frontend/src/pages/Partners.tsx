@@ -3,8 +3,8 @@ import { Forward, Users } from 'lucide-react'
 import { useFetch, type Handover, type Partner, type Shop } from '../api'
 import { useSession } from '../session'
 import { applyOps, overlayOps, useSync } from '../sync'
-import { addDays, fmtDate, inr, monthBounds, newestFirst, toPaise, todayIn } from '../lib'
-import { DateField, Empty, PageHead, Skeleton, Status } from '../ui'
+import { addDays, fmtDate, inr, monthBounds, newestFirst, part, toPaise, todayIn, type Method } from '../lib'
+import { DateField, Empty, MethodSeg, MethodTag, PageHead, Skeleton, Status } from '../ui'
 import { TxnSheet } from '../sheets'
 
 type Preset = 'all' | 'month' | '30d' | 'custom'
@@ -15,11 +15,12 @@ export default function Partners() {
   const [preset, setPreset] = useState<Preset>('all')
   const [range, setRange] = useState({ from: monthBounds(today)[0], to: today })
   const [selected, setSelected] = useState<string | null>(null)
+  const [method, setMethod] = useState<Method | ''>('')
   const [sheet, setSheet] = useState<{ item?: Handover } | null>(null)
   useSync()
 
   const [from, to] = preset === 'all' ? ['', ''] : preset === 'month' ? [monthBounds(today)[0], today] : preset === '30d' ? [addDays(today, -29), today] : [range.from, range.to]
-  const q = new URLSearchParams({ ...(from && { from }), ...(to && { to }) })
+  const q = new URLSearchParams({ ...(from && { from }), ...(to && { to }), ...(method && { method }) })
   const base = `/shops/${shop.id}`
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners?${q}`)
   const listQ = new URLSearchParams(q)
@@ -29,7 +30,7 @@ export default function Partners() {
 
   const partners = (parts.data?.partners ?? []).filter((p) => p.active || p.handoverCount > 0)
   const handovers = applyOps(ho.data?.items ?? [], overlayOps(shop.id, 'handover', ho.loadedAt),
-    (h) => (!from || h.date >= from) && (!to || h.date <= to) && (!selected || h.partnerId === selected))
+    (h) => (!from || h.date >= from) && (!to || h.date <= to) && (!selected || h.partnerId === selected) && (!method || part(h, method) > 0))
     .sort(newestFirst)
   const selectedName = partners.find((p) => p.id === selected)?.name
 
@@ -45,6 +46,7 @@ export default function Partners() {
           <button key={k} className={preset === k ? 'on' : ''} onClick={() => setPreset(k)}>{label}</button>
         ))}
       </div>
+      <MethodSeg value={method} onChange={setMethod} all />
       {preset === 'custom' && (
         <div className="rangeRow">
           <label className="field"><span>From</span><DateField value={range.from} max={range.to} onChange={(d) => setRange({ ...range, from: d })} label="From" /></label>
@@ -79,7 +81,7 @@ export default function Partners() {
             <button className="row" key={h.id} onClick={() => setSheet({ item: h })}>
               <span className="iconTile warm"><Forward size={19} strokeWidth={1.7} /></span>
               <span className="rowCopy">
-                <b>{h.partnerName}<Status item={h} /></b>
+                <b>{h.partnerName}<MethodTag item={h} /><Status item={h} /></b>
                 <small>{fmtDate(h.date)}{h.note ? ` · ${h.note}` : ''}</small>
               </span>
               <span className="amount">{inr(toPaise(h.amount))}</span>

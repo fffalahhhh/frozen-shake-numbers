@@ -36,6 +36,24 @@ export function sum(items: { amount: string }[]): number {
   return items.reduce((t, i) => t + toPaise(i.amount), 0)
 }
 
+export type Method = 'cash' | 'online'
+
+/**
+ * The part of an entry paid by `m` ('' = all), in paise. Revenue is split into
+ * cash + online; expenses and handovers are one or the other. Entries from
+ * before the split carry neither and are all cash.
+ */
+export function part(item: { amount: string; cash?: string; online?: string; method?: Method }, m: Method | ''): number {
+  if (!m) return toPaise(item.amount)
+  if (item.method) return item.method === m ? toPaise(item.amount) : 0
+  if (item.cash !== undefined || item.online !== undefined) return toPaise(item[m])
+  return m === 'cash' ? toPaise(item.amount) : 0
+}
+
+export function sumPart(items: Parameters<typeof part>[0][], m: Method | ''): number {
+  return items.reduce((t, i) => t + part(i, m), 0)
+}
+
 /** Sort by business date, then entry time, newest first. */
 export function newestFirst(a: { date: string; createdAt?: string }, b: { date: string; createdAt?: string }): number {
   return b.date.localeCompare(a.date) || (b.createdAt ?? '').localeCompare(a.createdAt ?? '')

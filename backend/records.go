@@ -28,7 +28,7 @@ func (a *app) listRevenue(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 		limit = v
 	}
 	rows, err := a.db.Query(r.Context(), `
-		SELECT business_date::text, amount::text, updated_at FROM daily_revenues
+		SELECT business_date::text, amount::text, cash::text, online::text, updated_at FROM daily_revenues
 		WHERE shop_id = $1 AND ($2::date IS NULL OR business_date >= $2) AND ($3::date IS NULL OR business_date <= $3)
 		ORDER BY business_date DESC LIMIT $4`, sc.ID, from, to, limit)
 	if err != nil {
@@ -36,7 +36,9 @@ func (a *app) listRevenue(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 	}
 	type rev struct {
 		Date      string    `json:"date"`
-		Amount    string    `json:"amount"`
+		Amount    string    `json:"amount"` // cash + online
+		Cash      string    `json:"cash"`
+		Online    string    `json:"online"`
 		UpdatedAt time.Time `json:"updatedAt"`
 	}
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[rev])
@@ -52,27 +54,32 @@ func (a *app) putRevenue(w http.ResponseWriter, r *http.Request, sc shopCtx) err
 	if err != nil {
 		return err
 	}
-	var in struct{ Amount Money }
+	var in struct{ Cash, Online, Amount Money }
 	if err := decode(w, r, &in); err != nil {
 		return err
 	}
-	if in.Amount == "" {
+	if in.Cash == "" && in.Online == "" {
+		in.Cash = in.Amount // {amount} from before the cash/online split (e.g. queued offline) is all cash
+	}
+	if in.Cash == "" && in.Online == "" {
 		return invalid("Amount is required")
 	}
-	var amount string
+	in.Cash, in.Online = Money(addMoney(string(in.Cash), "0")), Money(addMoney(string(in.Online), "0"))
+	var amount, cash, online string
 	var updatedAt time.Time
 	if err := a.db.QueryRow(r.Context(), `
-		INSERT INTO daily_revenues (shop_id, business_date, amount, updated_by) VALUES ($1, $2, $3, $4)
+		INSERT INTO daily_revenues (shop_id, business_date, cash, online, updated_by) VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (shop_id, business_date) DO UPDATE
-			SET amount = EXCLUDED.amount, updated_by = EXCLUDED.updated_by, updated_at = now()
-		RETURNING amount::text, updated_at`, sc.ID, date, string(in.Amount), sc.User.ID).Scan(&amount, &updatedAt); err != nil {
+			SET cash = EXCLUDED.cash, online = EXCLUDED.online, updated_by = EXCLUDED.updated_by, updated_at = now()
+		RETURNING amount::text, cash::text, online::text, updated_at`, sc.ID, date, string(in.Cash), string(in.Online), sc.User.ID,
+	).Scan(&amount, &cash, &online, &updatedAt); err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, map[string]any{"revenue": map[string]any{"date": date, "amount": amount, "updatedAt": updatedAt}})
+	return writeJSON(w, http.StatusOK, map[string]any{"revenue": map[string]any{"date": date, "amount": amount, "cash": cash, "online": online, "updatedAt": updatedAt}})
 }
 
 // ---------- Expenses & partner handovers ----------
-// Same shape: amount + date + note + a reference (category / partner) whose
+// Same shape: amount + method + date + note + a reference (category / partner) whose
 // name is snapshotted on the row so history survives renames.
 
 type txnKind struct {
@@ -85,17 +92,17 @@ var (
 )
 
 func (k txnKind) cols() string {
-	return fmt.Sprintf(`id, business_date::text, amount::text, %[1]s_id, %[1]s_name, note, created_at, updated_at`, k.ref)
+	return fmt.Sprintf(`id, business_date::text, amount::text, method, %[1]s_id, %[1]s_name, note, created_at, updated_at`, k.ref)
 }
 
 func (k txnKind) scan(row pgx.Row) (map[string]any, error) {
-	var id, date, amount, refID, refName, note string
+	var id, date, amount, method, refID, refName, note string
 	var created, updated time.Time
-	if err := row.Scan(&id, &date, &amount, &refID, &refName, &note, &created, &updated); err != nil {
+	if err := row.Scan(&id, &date, &amount, &method, &refID, &refName, &note, &created, &updated); err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"id": id, "date": date, "amount": amount, k.ref + "Id": refID, k.ref + "Name": refName,
+		"id": id, "date": date, "amount": amount, "method": method, k.ref + "Id": refID, k.ref + "Name": refName,
 		"note": note, "createdAt": created, "updatedAt": updated,
 	}, nil
 }
@@ -104,6 +111,7 @@ type txnInput struct {
 	ID         string `json:"id"` // optional client-generated UUID = idempotency key
 	Date       string `json:"date"`
 	Amount     Money  `json:"amount"`
+	Method     string `json:"method"` // cash (default) | online
 	CategoryID string `json:"categoryId"`
 	PartnerID  string `json:"partnerId"`
 	Note       string `json:"note"`
@@ -120,6 +128,11 @@ func (a *app) validateTxn(r *http.Request, sc shopCtx, k txnKind, in *txnInput) 
 	}
 	if in.Amount == "" || in.Amount.IsZero() {
 		return "", "", invalid("Amount must be more than ₹0")
+	}
+	if in.Method == "" {
+		in.Method = "cash"
+	} else if in.Method != "cash" && in.Method != "online" {
+		return "", "", invalid("Choose cash or online")
 	}
 	if in.Note, err = cleanNote(in.Note); err != nil {
 		return
@@ -155,14 +168,18 @@ func (a *app) listTxns(k txnKind) func(http.ResponseWriter, *http.Request, shopC
 			}
 			refID = &v
 		}
+		method, err := optMethod(r)
+		if err != nil {
+			return err
+		}
 		limit := 500
 		if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v < limit {
 			limit = v
 		}
 		rows, err := a.db.Query(r.Context(), `SELECT `+k.cols()+` FROM `+k.table+`
 			WHERE shop_id = $1 AND ($2::date IS NULL OR business_date >= $2) AND ($3::date IS NULL OR business_date <= $3)
-				AND ($4::uuid IS NULL OR `+k.ref+`_id = $4)
-			ORDER BY business_date DESC, created_at DESC LIMIT $5`, sc.ID, from, to, refID, limit)
+				AND ($4::uuid IS NULL OR `+k.ref+`_id = $4) AND ($6::text IS NULL OR method = $6)
+			ORDER BY business_date DESC, created_at DESC LIMIT $5`, sc.ID, from, to, refID, limit, method)
 		if err != nil {
 			return err
 		}
@@ -189,10 +206,10 @@ func (a *app) createTxn(k txnKind) func(http.ResponseWriter, *http.Request, shop
 			id = in.ID
 		}
 		item, err := k.scan(a.db.QueryRow(r.Context(), `
-			INSERT INTO `+k.table+` (id, shop_id, business_date, amount, `+k.ref+`_id, `+k.ref+`_name, note, created_by)
-			VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO `+k.table+` (id, shop_id, business_date, amount, `+k.ref+`_id, `+k.ref+`_name, note, created_by, method)
+			VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT (id) DO NOTHING
-			RETURNING `+k.cols(), id, sc.ID, in.Date, string(in.Amount), refID, refName, in.Note, sc.User.ID))
+			RETURNING `+k.cols(), id, sc.ID, in.Date, string(in.Amount), refID, refName, in.Note, sc.User.ID, in.Method))
 		if err == nil {
 			return writeJSON(w, http.StatusCreated, map[string]any{"item": item})
 		}
@@ -230,9 +247,9 @@ func (a *app) updateTxn(k txnKind) func(http.ResponseWriter, *http.Request, shop
 		item, err := k.scan(a.db.QueryRow(r.Context(), `
 			UPDATE `+k.table+` SET business_date = $3, amount = $4,
 				`+k.ref+`_name = CASE WHEN `+k.ref+`_id = $5 THEN `+k.ref+`_name ELSE $6 END,
-				`+k.ref+`_id = $5, note = $7, updated_at = now()
+				`+k.ref+`_id = $5, note = $7, method = $8, updated_at = now()
 			WHERE id = $1 AND shop_id = $2
-			RETURNING `+k.cols(), id, sc.ID, in.Date, string(in.Amount), refID, refName, in.Note))
+			RETURNING `+k.cols(), id, sc.ID, in.Date, string(in.Amount), refID, refName, in.Note, in.Method))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		} else if err != nil {
@@ -415,7 +432,7 @@ func (a *app) deleteLeave(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 	return nil
 }
 
-// listPartners includes each partner's handover total, optionally within ?from=&to=.
+// listPartners includes each partner's handover total, optionally within ?from=&to= and ?method=.
 func (a *app) listPartners(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
 	from, err := optDate(r, "from")
 	if err != nil {
@@ -425,13 +442,18 @@ func (a *app) listPartners(w http.ResponseWriter, r *http.Request, sc shopCtx) e
 	if err != nil {
 		return err
 	}
+	method, err := optMethod(r)
+	if err != nil {
+		return err
+	}
 	rows, err := a.db.Query(r.Context(), `
 		SELECT p.id, p.name, p.active, COALESCE(sum(h.amount), 0)::text, count(h.id)
 		FROM partners p
 		LEFT JOIN partner_handovers h ON h.shop_id = p.shop_id AND h.partner_id = p.id
 			AND ($2::date IS NULL OR h.business_date >= $2) AND ($3::date IS NULL OR h.business_date <= $3)
+			AND ($4::text IS NULL OR h.method = $4)
 		WHERE p.shop_id = $1
-		GROUP BY p.id ORDER BY p.sort_order, p.created_at`, sc.ID, from, to)
+		GROUP BY p.id ORDER BY p.sort_order, p.created_at`, sc.ID, from, to, method)
 	if err != nil {
 		return err
 	}
@@ -526,6 +548,13 @@ func (a *app) deactivateNamed(table string) func(http.ResponseWriter, *http.Requ
 // Cash in hand is a running, all-time balance: every revenue minus every
 // expense minus every partner handover (handovers are not expenses). A day's
 // entries are still dated, but a day isn't expected to balance on its own.
+// Passing a method (cash / online) restricts every figure to that side: the
+// revenue's cash or online part, and only entries paid that way.
+
+// revenueCol picks the revenue column for method $n (NULL = both).
+func revenueCol(n int) string {
+	return fmt.Sprintf(`CASE $%[1]d::text WHEN 'cash' THEN cash WHEN 'online' THEN online ELSE amount END`, n)
+}
 
 type totals struct {
 	Revenue    string `json:"revenue"`
@@ -534,28 +563,34 @@ type totals struct {
 	CashInHand string `json:"cashInHand"`
 }
 
-// totalsBefore sums everything dated before `before` (nil = all time) and
-// returns the earliest date with any activity.
-func (a *app) totalsBefore(ctx context.Context, shopID string, before *string) (t totals, since *string, err error) {
+// totalsBefore sums everything dated before `before` (nil = all time) paid by
+// `method` (nil = both) and returns the earliest date with any activity.
+func (a *app) totalsBefore(ctx context.Context, shopID string, before, method *string) (t totals, since *string, err error) {
 	err = a.db.QueryRow(ctx, `
 		SELECT r::text, e::text, h::text, (r - e - h)::text, first::text FROM (SELECT
-			(SELECT COALESCE(sum(amount), 0.00) FROM daily_revenues WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) r,
-			(SELECT COALESCE(sum(amount), 0.00) FROM expenses WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) e,
-			(SELECT COALESCE(sum(amount), 0.00) FROM partner_handovers WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) h,
+			(SELECT COALESCE(sum(`+revenueCol(3)+`), 0.00) FROM daily_revenues WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2)) r,
+			(SELECT COALESCE(sum(amount), 0.00) FROM expenses WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2) AND ($3::text IS NULL OR method = $3)) e,
+			(SELECT COALESCE(sum(amount), 0.00) FROM partner_handovers WHERE shop_id = $1 AND ($2::date IS NULL OR business_date < $2) AND ($3::text IS NULL OR method = $3)) h,
 			LEAST((SELECT min(business_date) FROM daily_revenues WHERE shop_id = $1),
 				(SELECT min(business_date) FROM expenses WHERE shop_id = $1),
 				(SELECT min(business_date) FROM partner_handovers WHERE shop_id = $1)) first
-		) x`, shopID, before).Scan(&t.Revenue, &t.Expenses, &t.Handovers, &t.CashInHand, &since)
+		) x`, shopID, before, method).Scan(&t.Revenue, &t.Expenses, &t.Handovers, &t.CashInHand, &since)
 	return
 }
 
-// summary: all-time totals for the shop.
+// summary: all-time totals for the shop, overall and per method.
 func (a *app) summary(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
-	t, since, err := a.totalsBefore(r.Context(), sc.ID, nil)
+	t, since, err := a.totalsBefore(r.Context(), sc.ID, nil, nil)
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, map[string]any{"summary": t, "since": since})
+	out := map[string]any{"summary": t, "since": since}
+	for _, m := range []string{"cash", "online"} {
+		if out[m], _, err = a.totalsBefore(r.Context(), sc.ID, nil, &m); err != nil {
+			return err
+		}
+	}
+	return writeJSON(w, http.StatusOK, out)
 }
 
 type dayRow struct {
@@ -567,7 +602,8 @@ type dayRow struct {
 	Balance   string `json:"balance"` // cash in hand at the end of that day (running total)
 }
 
-// history returns one row per date that has any activity in [from, to].
+// history returns one row per date that has any activity in [from, to],
+// optionally only for ?method=cash|online.
 func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
 	from, err := parseDate(r.URL.Query().Get("from"))
 	if err != nil {
@@ -577,28 +613,32 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 	if err != nil {
 		return invalid("to: Date must be YYYY-MM-DD")
 	}
-	before, _, err := a.totalsBefore(r.Context(), sc.ID, &from)
+	method, err := optMethod(r)
+	if err != nil {
+		return err
+	}
+	before, _, err := a.totalsBefore(r.Context(), sc.ID, &from, method)
 	if err != nil {
 		return err
 	}
 	opening := before.CashInHand
 	rows, err := a.db.Query(r.Context(), `
 		WITH rev AS (
-			SELECT business_date d, amount FROM daily_revenues
-			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3
+			SELECT business_date d, `+revenueCol(5)+` amount FROM daily_revenues
+			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 AND ($5::text IS NULL OR `+revenueCol(5)+` > 0)
 		), exp AS (
 			SELECT business_date d, sum(amount) amount FROM expenses
-			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 GROUP BY 1
+			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 AND ($5::text IS NULL OR method = $5) GROUP BY 1
 		), ho AS (
 			SELECT business_date d, sum(amount) amount FROM partner_handovers
-			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 GROUP BY 1
+			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 AND ($5::text IS NULL OR method = $5) GROUP BY 1
 		), t AS (
 			SELECT d, COALESCE(rev.amount, 0.00) r, COALESCE(exp.amount, 0.00) e, COALESCE(ho.amount, 0.00) h
 			FROM rev FULL JOIN exp USING (d) FULL JOIN ho USING (d)
 		)
 		SELECT d::text, r::text, e::text, h::text, (r - e - h)::text,
 			($4::numeric + sum(r - e - h) OVER (ORDER BY d))::text
-		FROM t ORDER BY d DESC`, sc.ID, from, to, opening)
+		FROM t ORDER BY d DESC`, sc.ID, from, to, opening, method)
 	if err != nil {
 		return err
 	}

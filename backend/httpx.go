@@ -116,6 +116,18 @@ func optDate(r *http.Request, key string) (*string, error) {
 	return &d, err
 }
 
+// optMethod parses an optional ?method=cash|online filter; nil means both.
+func optMethod(r *http.Request) (*string, error) {
+	v := r.URL.Query().Get("method")
+	if v == "" {
+		return nil, nil
+	}
+	if v != "cash" && v != "online" {
+		return nil, invalid("method must be cash or online")
+	}
+	return &v, nil
+}
+
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func isUUID(s string) bool { return uuidRe.MatchString(s) }

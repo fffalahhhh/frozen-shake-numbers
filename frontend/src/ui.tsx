@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
 import { CalendarDays, X, type LucideIcon } from 'lucide-react'
-import { fmtDate } from './lib'
+import { fmtDate, type Method } from './lib'
 
 export function PageHead({ eyebrow, title, sub }: { eyebrow: string; title: string; sub: string }) {
   return (
@@ -133,7 +133,26 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function MoneyInput({ value, onChange, autoFocus }: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
+/** Cash / Online picker. With `all`, adds an "All" option whose value is ''. */
+export function MethodSeg<M extends Method | ''>({ value, onChange, all, className = 'seg' }: { value: M; onChange: (m: M) => void; all?: boolean; className?: string }) {
+  const opts = [...(all ? [['', 'All']] : []), ['cash', 'Cash'], ['online', 'Online']] as [M, string][]
+  return (
+    <div className={className} role="tablist">
+      {opts.map(([k, label]) => (
+        <button key={k} type="button" role="tab" aria-selected={value === k} className={value === k ? 'on' : ''} onClick={() => onChange(k)}>{label}</button>
+      ))}
+    </div>
+  )
+}
+
+/** Small tag for entries paid online (cash is the default and goes unmarked). */
+export function MethodTag({ item }: { item: { method?: Method } }) {
+  return item.method === 'online' ? <span className="chip muted">Online</span> : null
+}
+
+export function MoneyInput({ value, onChange, autoFocus, required = true, label = 'Amount in rupees' }: {
+  value: string; onChange: (v: string) => void; autoFocus?: boolean; required?: boolean; label?: string
+}) {
   return (
     <div className="money">
       <input
@@ -142,8 +161,8 @@ export function MoneyInput({ value, onChange, autoFocus }: { value: string; onCh
         value={value}
         autoFocus={autoFocus}
         onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ''))}
-        aria-label="Amount in rupees"
-        required
+        aria-label={label}
+        required={required}
       />
     </div>
   )
