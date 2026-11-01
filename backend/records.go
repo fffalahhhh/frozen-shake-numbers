@@ -617,12 +617,32 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 	if err != nil {
 		return err
 	}
-	before, _, err := a.totalsBefore(r.Context(), sc.ID, &from, method)
+	days, opening, err := a.historyDays(r.Context(), sc.ID, from, to, method)
 	if err != nil {
 		return err
 	}
+	var rev, exp, ho, net string
+	for _, d := range days {
+		rev, exp, ho, net = addMoney(rev, d.Revenue), addMoney(exp, d.Expenses), addMoney(ho, d.Handovers), addMoney(net, d.Net)
+	}
+	if days == nil {
+		days = []dayRow{}
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"days": days, "totals": map[string]string{
+		"revenue": addMoney(rev, "0"), "expenses": addMoney(exp, "0"), "handovers": addMoney(ho, "0"),
+		"net": addMoney(net, "0"), "openingBalance": addMoney(opening, "0"), "closingBalance": addMoney(opening, net),
+	}})
+}
+
+// historyDays returns each active date in [from, to], newest first, and the
+// balance carried in from before `from`.
+func (a *app) historyDays(ctx context.Context, shopID, from, to string, method *string) ([]dayRow, string, error) {
+	before, _, err := a.totalsBefore(ctx, shopID, &from, method)
+	if err != nil {
+		return nil, "", err
+	}
 	opening := before.CashInHand
-	rows, err := a.db.Query(r.Context(), `
+	rows, err := a.db.Query(ctx, `
 		WITH rev AS (
 			SELECT business_date d, `+revenueCol(5)+` amount FROM daily_revenues
 			WHERE shop_id = $1 AND business_date BETWEEN $2 AND $3 AND ($5::text IS NULL OR `+revenueCol(5)+` > 0)
@@ -638,25 +658,12 @@ func (a *app) history(w http.ResponseWriter, r *http.Request, sc shopCtx) error 
 		)
 		SELECT d::text, r::text, e::text, h::text, (r - e - h)::text,
 			($4::numeric + sum(r - e - h) OVER (ORDER BY d))::text
-		FROM t ORDER BY d DESC`, sc.ID, from, to, opening, method)
+		FROM t ORDER BY d DESC`, shopID, from, to, opening, method)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	days, err := pgx.CollectRows(rows, pgx.RowToStructByPos[dayRow])
-	if err != nil {
-		return err
-	}
-	var rev, exp, ho, net string
-	for _, d := range days {
-		rev, exp, ho, net = addMoney(rev, d.Revenue), addMoney(exp, d.Expenses), addMoney(ho, d.Handovers), addMoney(net, d.Net)
-	}
-	if days == nil {
-		days = []dayRow{}
-	}
-	return writeJSON(w, http.StatusOK, map[string]any{"days": days, "totals": map[string]string{
-		"revenue": addMoney(rev, "0"), "expenses": addMoney(exp, "0"), "handovers": addMoney(ho, "0"),
-		"net": addMoney(net, "0"), "openingBalance": addMoney(opening, "0"), "closingBalance": addMoney(opening, net),
-	}})
+	return days, opening, err
 }
 
 // addMoney adds two decimal strings exactly (big.Rat, no float rounding).

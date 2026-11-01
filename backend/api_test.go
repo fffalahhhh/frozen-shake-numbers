@@ -9,10 +9,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +24,14 @@ func TestAddMoney(t *testing.T) {
 	for _, c := range [][3]string{{"", "0", "0.00"}, {"0.10", "0.20", "0.30"}, {"4000.00", "-1550.50", "2449.50"}} {
 		if got := addMoney(c[0], c[1]); got != c[2] {
 			t.Errorf("addMoney(%q, %q) = %q, want %q", c[0], c[1], got, c[2])
+		}
+	}
+}
+
+func TestINR(t *testing.T) {
+	for in, want := range map[string]string{"0": "₹0.00", "999.5": "₹999.50", "1000": "₹1,000.00", "123456.78": "₹1,23,456.78", "-12345678": "−₹1,23,45,678.00", "-0.00": "₹0.00"} {
+		if got := inr(in); got != want {
+			t.Errorf("inr(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -214,7 +224,7 @@ func TestTenantIsolation(t *testing.T) {
 	for _, req := range [][2]string{
 		{"GET", a}, {"PUT", a}, {"DELETE", a},
 		{"GET", a + "/expenses"}, {"GET", a + "/revenue"}, {"PUT", a + "/revenue/" + day},
-		{"GET", a + "/history?from=2026-10-01&to=2026-10-31"}, {"GET", a + "/summary"}, {"GET", a + "/categories"}, {"GET", a + "/partners"},
+		{"GET", a + "/history?from=2026-10-01&to=2026-10-31"}, {"GET", a + "/summary"}, {"GET", a + "/export.pdf?to=2026-10-31"}, {"GET", a + "/categories"}, {"GET", a + "/partners"},
 		{"PUT", a + "/expenses/" + expID}, {"DELETE", a + "/expenses/" + expID},
 		{"POST", a + "/handovers"}, {"PUT", a + "/categories/" + aCat}, {"DELETE", a + "/partners/" + aPartner},
 	} {
@@ -287,4 +297,31 @@ func TestDuesAndLeaves(t *testing.T) {
 	bShop, _, _ := bob.signup("bob-staff@example.com")
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/leaves/2026-10-21", map[string]any{})
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/categories/"+cat+"/due", map[string]any{"amount": "1", "day": 1})
+}
+
+func TestExportPDF(t *testing.T) {
+	srv := newTestServer(t)
+	c := newClient(t, srv)
+	shop, cat, partner := c.signup("export@example.com")
+	base := "/api/shops/" + shop
+	c.must(200, "PUT", base+"/revenue/2026-10-02", map[string]any{"cash": "5000", "online": "2500"})
+	c.must(201, "POST", base+"/expenses", map[string]any{"date": "2026-10-02", "amount": "820.50", "categoryId": cat, "note": "Milk"})
+	c.must(201, "POST", base+"/handovers", map[string]any{"date": "2026-10-03", "amount": "1000", "partnerId": partner, "method": "online"})
+
+	for _, q := range []string{"from=2026-10-01&to=2026-10-31&items=1", "to=2026-10-31&method=cash&sections=expenses,days"} {
+		res, err := c.http.Get(c.base + base + "/export.pdf?" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 || res.Header.Get("Content-Type") != "application/pdf" || !bytes.HasPrefix(body, []byte("%PDF")) {
+			t.Fatalf("%s: got %d %s %.80q", q, res.StatusCode, res.Header.Get("Content-Type"), body)
+		}
+		if q[0] == 'f' && !strings.Contains(res.Header.Get("Content-Disposition"), "Frozen-Shake_Statement_2026-10.pdf") {
+			t.Errorf("filename: %s", res.Header.Get("Content-Disposition"))
+		}
+	}
+	c.must(422, "GET", base+"/export.pdf?to=2026-10-31&sections=staff", nil)
+	c.must(422, "GET", base+"/export.pdf?from=2026-10-31&to=2026-10-01", nil)
 }

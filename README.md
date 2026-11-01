@@ -127,6 +127,7 @@ backend/            Go API
   auth.go           register/login/logout/reset, sessions
   shops.go          shop CRUD + tenant middleware + default seeds
   records.go        revenue, expenses, handovers, categories, partners, history
+  export.go         PDF statement (fpdf, with the Inter font embedded from fonts/)
   httpx.go          JSON/errors/validation helpers
   migrations/       SQL migrations (embedded)
   api_test.go       integration tests

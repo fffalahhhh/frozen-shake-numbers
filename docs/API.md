@@ -175,3 +175,24 @@ values add up to the overall one: cash in the drawer and the online balance.
   before it.
 - `openingBalance` is the cash in hand before `from`.
 - `closingBalance` is `openingBalance` plus the period's `net`.
+
+## PDF statement
+
+`GET /shops/{shopId}/export.pdf?from=&to=&method=&sections=&items=1`
+
+Returns an A4 PDF statement (`Content-Disposition: attachment`) for one shop and period.
+
+| Param | |
+|---|---|
+| `from` | Start date. Leave it out for all time |
+| `to` | End date (required) |
+| `method` | `cash` or `online` limits every figure to that side, as in history |
+| `sections` | Comma list of `expenses`, `handovers`, `revenue`, `days`. Empty means all of them |
+| `items` | `1` lists each expense under its category and each handover under its partner. Otherwise only their totals are shown |
+
+The first page has the summary: opening balance, revenue (split into cash and
+online), expenses, handed over, net and closing balance. Expenses are grouped
+by their category's current name and handovers by partner, biggest first.
+Periods longer than 62 days, and all time, show revenue and the totals table
+per month instead of per day. Long tables continue onto the next page with
+their headings repeated, and every page carries "Page X of Y".

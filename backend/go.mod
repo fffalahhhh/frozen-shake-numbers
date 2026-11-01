@@ -3,6 +3,7 @@ module frozenshake
 go 1.26.0
 
 require (
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/crypto v0.58.0
 )

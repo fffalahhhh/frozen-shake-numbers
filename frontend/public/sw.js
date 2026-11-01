@@ -30,6 +30,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request
   const url = new URL(req.url)
   if (req.method !== 'GET' || url.origin !== location.origin) return
+  if (url.pathname.endsWith('/export.pdf')) return // downloads: always fresh, never cached
 
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirst(req, API))
