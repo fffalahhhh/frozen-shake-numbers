@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Copy,
   FileDown,
   ReceiptText,
 } from "lucide-react";
@@ -12,10 +13,11 @@ import {
   type Category,
   type Expense,
   type HistoryDay,
+  type Revenue,
   type Shop,
 } from "../api";
 import { useSession } from "../session";
-import { applyOps, overlayOps, useSync } from "../sync";
+import { applyOps, applyRevenueOps, overlayOps, useSync } from "../sync";
 import {
   addMonths,
   fmtDate,
@@ -62,6 +64,7 @@ export default function History() {
   const [range, setRange] = useState({ from: thisMonth, to: today });
   const [method, setMethod] = useState<Method | "">("");
   const [exporting, setExporting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [view, setView] = useState<"days" | "expenses">("days");
 
   const [from, to] =
@@ -147,6 +150,9 @@ export default function History() {
           {view === "days" &&
             `${days.length} ${days.length === 1 ? "day" : "days"} recorded · In hand is the running balance`}
         </p>
+        <button className="link" onClick={() => setCopying(true)}>
+          <Copy size={15} style={{ verticalAlign: -3 }} /> Copy text
+        </button>
         <button className="link" onClick={() => setExporting(true)}>
           <FileDown size={15} style={{ verticalAlign: -3 }} /> Export PDF
         </button>
@@ -236,6 +242,13 @@ export default function History() {
             })}
           </div>
         </>
+      )}
+      {copying && (
+        <CopyTextSheet
+          shop={shop}
+          today={today}
+          onClose={() => setCopying(false)}
+        />
       )}
       {exporting && (
         <ExportSheet
@@ -352,6 +365,79 @@ function ExpensesByDay({
         />
       )}
     </>
+  );
+}
+
+/** One day's revenue as plain text to paste into WhatsApp (*bold* is WhatsApp markup). */
+function CopyTextSheet({
+  shop,
+  today,
+  onClose,
+}: {
+  shop: Shop;
+  today: string;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(today);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const rev = useFetch<{ revenue: Revenue[] }>(
+    `/shops/${shop.id}/revenue?from=${date}&to=${date}`,
+  );
+  const day = applyRevenueOps(
+    rev.data?.revenue ?? [],
+    overlayOps(shop.id, "revenue", rev.loadedAt),
+  ).find((r) => r.date === date);
+  const text = day
+    ? [
+        `*${shop.name}*`,
+        fmtDate(date),
+        `Revenue: *${inr(part(day, ""))}*`,
+        `Cash: ${inr(part(day, "cash"))}`,
+        `Online: ${inr(part(day, "online"))}`,
+      ].join("\n")
+    : "";
+  const copy = async () => {
+    setError("");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Couldn’t copy. Select the text above and copy it instead.");
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Copy revenue as text">
+      <label className="field">
+        <span>Date</span>
+        <DateField
+          value={date}
+          max={today}
+          onChange={(d) => (setDate(d), setCopied(false))}
+        />
+      </label>
+      {rev.loading && !rev.data ? (
+        <Skeleton rows={1} />
+      ) : rev.error && !rev.data ? (
+        <p className="formError">
+          {rev.error.status === 0
+            ? "You’re offline and this day isn’t saved on this device yet."
+            : rev.error.message}
+        </p>
+      ) : day ? (
+        <pre className="copyText">{text}</pre>
+      ) : (
+        <p className="hint">No revenue entered for this day.</p>
+      )}
+      {error && <p className="formError">{error}</p>}
+      <div className="sheetActions mt">
+        <button className="btn big" onClick={copy} disabled={!day}>
+          <Copy size={18} /> {copied ? "Copied" : "Copy text"}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 
