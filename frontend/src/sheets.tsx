@@ -159,15 +159,22 @@ const toLocalInput = (iso: string) => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 }
 
+/** "Matches" / "₹220 short" / "₹220 extra": a count against what the app expected, in paise. */
+export function countDiff(counted: number, expected: number): string {
+  const d = counted - expected
+  return d === 0 ? 'Matches' : `${inr(Math.abs(d))} ${d < 0 ? 'short' : 'extra'}`
+}
+
 /** Log, edit or delete a physical cash count. `expected` (paise) is the app's cash in hand, shown for new counts. */
-export function CountSheet({ shop, item, expected, onClose }: { shop: Shop; item?: CashCount; expected?: number; onClose: () => void }) {
+export function CountSheet({ shop, item, expected: now, onClose }: { shop: Shop; item?: CashCount; expected?: number; onClose: () => void }) {
   const sheet = useRef<SheetHandle>(null)
   const confirm = useConfirm()
   const [amount, setAmount] = useState(item ? String(Number(item.amount)) : '')
   const [at, setAt] = useState(toLocalInput(item?.countedAt ?? new Date().toISOString()))
   const [note, setNote] = useState(item?.note ?? '')
   const [error, setError] = useState('')
-  const diff = expected !== undefined && isAmount(amount) ? toPaise(amount) - expected : null
+  // New counts compare with cash in hand now; saved ones with what the app said when they were made.
+  const expected = item ? (item.expected === null ? undefined : toPaise(item.expected)) : now
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -176,7 +183,7 @@ export function CountSheet({ shop, item, expected, onClose }: { shop: Shop; item
     const body = { countedAt: new Date(at).toISOString(), amount: amount.trim(), note: note.trim() }
     enqueue(item
       ? { shopId: shop.id, kind: 'count', action: 'update', targetId: item.id, body }
-      : { shopId: shop.id, kind: 'count', action: 'create', targetId: uuid(), body })
+      : { shopId: shop.id, kind: 'count', action: 'create', targetId: uuid(), body: { ...body, expected: expected === undefined ? null : fromPaise(expected) } })
     sheet.current?.dismiss()
   }
 
@@ -195,8 +202,8 @@ export function CountSheet({ shop, item, expected, onClose }: { shop: Shop; item
           <MoneyInput value={amount} onChange={setAmount} autoFocus={!item} label="Cash counted in rupees" />
           {expected !== undefined && (
             <p className="hint">
-              App says {inr(expected)} cash in hand
-              {diff === null ? '' : diff === 0 ? ' · Matches' : ` · ${inr(Math.abs(diff))} ${diff < 0 ? 'short' : 'extra'}`}
+              App {item ? 'said' : 'says'} {inr(expected)} cash in hand
+              {isAmount(amount) ? ` · ${countDiff(toPaise(amount), expected)}` : ''}
             </p>
           )}
         </label>

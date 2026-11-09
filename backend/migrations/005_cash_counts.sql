@@ -5,6 +5,7 @@ CREATE TABLE cash_counts (
     shop_id    uuid NOT NULL REFERENCES shops ON DELETE CASCADE,
     counted_at timestamptz NOT NULL,
     amount     numeric(12, 2) NOT NULL CHECK (amount >= 0),
+    expected   numeric(12, 2), -- the app's cash in hand when counted; NULL if unknown
     note       text NOT NULL DEFAULT '',
     created_by uuid REFERENCES users ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),

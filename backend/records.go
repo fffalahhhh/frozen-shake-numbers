@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -277,17 +278,18 @@ func (a *app) deleteTxn(k txnKind) func(http.ResponseWriter, *http.Request, shop
 // ---------- Cash counts ----------
 // A log of physical cash counts. Informational only: never part of any total.
 
-const countCols = `id, counted_at, amount::text, note`
+const countCols = `id, counted_at, amount::text, expected::text, note`
 
 type cashCount struct {
 	ID        string    `json:"id"`
 	CountedAt time.Time `json:"countedAt"`
 	Amount    string    `json:"amount"`
+	Expected  *string   `json:"expected"`
 	Note      string    `json:"note"`
 }
 
 func scanCount(row pgx.Row) (c cashCount, err error) {
-	err = row.Scan(&c.ID, &c.CountedAt, &c.Amount, &c.Note)
+	err = row.Scan(&c.ID, &c.CountedAt, &c.Amount, &c.Expected, &c.Note)
 	return
 }
 
@@ -295,8 +297,11 @@ type countInput struct {
 	ID        string    `json:"id"` // optional client-generated UUID = idempotency key
 	CountedAt time.Time `json:"countedAt"`
 	Amount    Money     `json:"amount"`
+	Expected  *string   `json:"expected"` // set on create only; may be negative
 	Note      string    `json:"note"`
 }
+
+var signedMoneyRe = regexp.MustCompile(`^-?\d{1,10}(\.\d{1,2})?$`)
 
 func (in *countInput) validate() (err error) {
 	if in.ID != "" && !isUUID(in.ID) {
@@ -304,6 +309,9 @@ func (in *countInput) validate() (err error) {
 	}
 	if in.Amount == "" {
 		return invalid("Amount is required")
+	}
+	if in.Expected != nil && !signedMoneyRe.MatchString(*in.Expected) {
+		return invalid("Expected must be a number with at most 2 decimals")
 	}
 	if in.CountedAt.IsZero() {
 		in.CountedAt = time.Now()
@@ -342,10 +350,10 @@ func (a *app) createCount(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 		id = in.ID
 	}
 	item, err := scanCount(a.db.QueryRow(r.Context(), `
-		INSERT INTO cash_counts (id, shop_id, counted_at, amount, note, created_by)
-		VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)
+		INSERT INTO cash_counts (id, shop_id, counted_at, amount, note, created_by, expected)
+		VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO NOTHING
-		RETURNING `+countCols, id, sc.ID, in.CountedAt, string(in.Amount), in.Note, sc.User.ID))
+		RETURNING `+countCols, id, sc.ID, in.CountedAt, string(in.Amount), in.Note, sc.User.ID, in.Expected))
 	if err == nil {
 		return writeJSON(w, http.StatusCreated, map[string]any{"item": item})
 	}

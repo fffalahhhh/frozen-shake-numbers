@@ -109,12 +109,12 @@ Same shape as expenses, with `partnerId` / `partnerName` in place of the categor
 
 A log of physical cash counts ("I counted the drawer and found this much"). They're
 for your reference only and never change any total.
-`CashCount = {id, countedAt, amount, note}`, where `countedAt` is an RFC 3339 timestamp and `amount` is `>= 0`.
+`CashCount = {id, countedAt, amount, expected, note}`, where `countedAt` is an RFC 3339 timestamp and `amount` is `>= 0`. `expected` is the app's cash in hand when the count was made (it can be negative, or `null` if unknown). It is set only on create and never changed by an update.
 
 | Method & path | Notes |
 |---|---|
 | `GET /shops/{shopId}/counts?limit=` | `{items: [CashCount]}`, newest first |
-| `POST /shops/{shopId}/counts` | `{id?, countedAt?, amount, note?}`. `countedAt` defaults to now |
+| `POST /shops/{shopId}/counts` | `{id?, countedAt?, amount, expected?, note?}`. `countedAt` defaults to now |
 | `PUT /shops/{shopId}/counts/{id}` | `{countedAt, amount, note?}`. A missing `countedAt` resets it to now |
 | `DELETE /shops/{shopId}/counts/{id}` | `204` |
 

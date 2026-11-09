@@ -6,7 +6,7 @@ import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
 import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, part, sumPart, toPaise, todayIn, type Method } from '../lib'
 import { Empty, MethodSeg, MethodTag, Skeleton, Status } from '../ui'
-import { CountSheet, RevenueSheet, TxnSheet } from '../sheets'
+import { countDiff, CountSheet, RevenueSheet, TxnSheet } from '../sheets'
 
 const RECENT_REVENUE = 7
 const RECENT_EXPENSES = 10
@@ -185,7 +185,9 @@ export default function Home() {
                     <span className="iconTile soft"><Coins size={19} strokeWidth={1.7} /></span>
                     <span className="rowCopy">
                       <b>{countTime(c.countedAt)}<Status item={c} /></b>
-                      {c.note && <small>{c.note}</small>}
+                      {(c.expected !== null || c.note) && (
+                        <small>{[c.expected !== null && countDiff(toPaise(c.amount), toPaise(c.expected)), c.note].filter(Boolean).join(' · ')}</small>
+                      )}
                     </span>
                     <span className="amount">{inr(toPaise(c.amount))}</span>
                   </button>

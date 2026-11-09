@@ -310,14 +310,15 @@ func TestCashCounts(t *testing.T) {
 	shop, _, _ := c.signup("counts@example.com")
 	base := "/api/shops/" + shop
 	id := "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
-	body := map[string]any{"id": id, "countedAt": "2026-11-10T09:30:00Z", "amount": "4200", "note": "Morning"}
+	body := map[string]any{"id": id, "countedAt": "2026-11-10T09:30:00Z", "amount": "4200", "expected": "-150.50", "note": "Morning"}
 	c.must(201, "POST", base+"/counts", body)
 	c.must(200, "POST", base+"/counts", body) // offline replay: no duplicate
 	c.must(201, "POST", base+"/counts", map[string]any{"countedAt": "2026-11-10T18:00:00Z", "amount": "0"})
+	c.must(422, "POST", base+"/counts", map[string]any{"amount": "1", "expected": "lots"})
 	c.must(200, "PUT", base+"/counts/"+id, map[string]any{"countedAt": "2026-11-10T09:30:00Z", "amount": "4150.50", "note": "Recounted"})
 
 	items := c.must(200, "GET", base+"/counts", nil)["items"].([]any)
-	if len(items) != 2 || items[1].(map[string]any)["amount"] != "4150.50" || items[1].(map[string]any)["note"] != "Recounted" {
+	if m := items[1].(map[string]any); len(items) != 2 || m["amount"] != "4150.50" || m["note"] != "Recounted" || m["expected"] != "-150.50" {
 		t.Fatalf("counts = %v", items)
 	}
 
