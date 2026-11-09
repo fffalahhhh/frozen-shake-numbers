@@ -304,6 +304,35 @@ func TestDuesAndLeaves(t *testing.T) {
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/salary", map[string]any{"amount": "1", "day": 1})
 }
 
+func TestCashCounts(t *testing.T) {
+	srv := newTestServer(t)
+	c := newClient(t, srv)
+	shop, _, _ := c.signup("counts@example.com")
+	base := "/api/shops/" + shop
+	id := "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+	body := map[string]any{"id": id, "countedAt": "2026-11-10T09:30:00Z", "amount": "4200", "note": "Morning"}
+	c.must(201, "POST", base+"/counts", body)
+	c.must(200, "POST", base+"/counts", body) // offline replay: no duplicate
+	c.must(201, "POST", base+"/counts", map[string]any{"countedAt": "2026-11-10T18:00:00Z", "amount": "0"})
+	c.must(200, "PUT", base+"/counts/"+id, map[string]any{"countedAt": "2026-11-10T09:30:00Z", "amount": "4150.50", "note": "Recounted"})
+
+	items := c.must(200, "GET", base+"/counts", nil)["items"].([]any)
+	if len(items) != 2 || items[1].(map[string]any)["amount"] != "4150.50" || items[1].(map[string]any)["note"] != "Recounted" {
+		t.Fatalf("counts = %v", items)
+	}
+
+	bob := newClient(t, srv)
+	bShop, _, _ := bob.signup("bob-counts@example.com")
+	bob.must(404, "PUT", "/api/shops/"+bShop+"/counts/"+id, map[string]any{"amount": "1"})
+	bob.must(409, "POST", "/api/shops/"+bShop+"/counts", body)
+
+	c.must(204, "DELETE", base+"/counts/"+id, nil)
+	c.must(204, "DELETE", base+"/counts/"+id, nil) // idempotent
+	if n := len(c.must(200, "GET", base+"/counts", nil)["items"].([]any)); n != 1 {
+		t.Errorf("after delete: %d counts", n)
+	}
+}
+
 func TestExportPDF(t *testing.T) {
 	srv := newTestServer(t)
 	c := newClient(t, srv)

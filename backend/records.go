@@ -274,6 +274,130 @@ func (a *app) deleteTxn(k txnKind) func(http.ResponseWriter, *http.Request, shop
 	}
 }
 
+// ---------- Cash counts ----------
+// A log of physical cash counts. Informational only: never part of any total.
+
+const countCols = `id, counted_at, amount::text, note`
+
+type cashCount struct {
+	ID        string    `json:"id"`
+	CountedAt time.Time `json:"countedAt"`
+	Amount    string    `json:"amount"`
+	Note      string    `json:"note"`
+}
+
+func scanCount(row pgx.Row) (c cashCount, err error) {
+	err = row.Scan(&c.ID, &c.CountedAt, &c.Amount, &c.Note)
+	return
+}
+
+type countInput struct {
+	ID        string    `json:"id"` // optional client-generated UUID = idempotency key
+	CountedAt time.Time `json:"countedAt"`
+	Amount    Money     `json:"amount"`
+	Note      string    `json:"note"`
+}
+
+func (in *countInput) validate() (err error) {
+	if in.ID != "" && !isUUID(in.ID) {
+		return invalid("id must be a UUID")
+	}
+	if in.Amount == "" {
+		return invalid("Amount is required")
+	}
+	if in.CountedAt.IsZero() {
+		in.CountedAt = time.Now()
+	}
+	in.Note, err = cleanNote(in.Note)
+	return
+}
+
+func (a *app) listCounts(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	limit := 500
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v < limit {
+		limit = v
+	}
+	rows, err := a.db.Query(r.Context(), `SELECT `+countCols+` FROM cash_counts WHERE shop_id = $1 ORDER BY counted_at DESC LIMIT $2`, sc.ID, limit)
+	if err != nil {
+		return err
+	}
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (cashCount, error) { return scanCount(row) })
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// createCount is idempotent on a client-supplied id, like createTxn.
+func (a *app) createCount(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	var in countInput
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	if err := in.validate(); err != nil {
+		return err
+	}
+	var id any // nil → server generates
+	if in.ID != "" {
+		id = in.ID
+	}
+	item, err := scanCount(a.db.QueryRow(r.Context(), `
+		INSERT INTO cash_counts (id, shop_id, counted_at, amount, note, created_by)
+		VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO NOTHING
+		RETURNING `+countCols, id, sc.ID, in.CountedAt, string(in.Amount), in.Note, sc.User.ID))
+	if err == nil {
+		return writeJSON(w, http.StatusCreated, map[string]any{"item": item})
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	item, err = scanCount(a.db.QueryRow(r.Context(), `SELECT `+countCols+` FROM cash_counts WHERE id = $1 AND shop_id = $2`, in.ID, sc.ID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conflict("This id is already in use")
+	} else if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"item": item})
+}
+
+func (a *app) updateCount(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in countInput
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	in.ID = ""
+	if err := in.validate(); err != nil {
+		return err
+	}
+	item, err := scanCount(a.db.QueryRow(r.Context(), `
+		UPDATE cash_counts SET counted_at = $3, amount = $4, note = $5, updated_at = now()
+		WHERE id = $1 AND shop_id = $2 RETURNING `+countCols, id, sc.ID, in.CountedAt, string(in.Amount), in.Note))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errNotFound
+	} else if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, map[string]any{"item": item})
+}
+
+// deleteCount is idempotent: deleting an already-deleted row is still 204.
+func (a *app) deleteCount(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	if _, err := a.db.Exec(r.Context(), `DELETE FROM cash_counts WHERE id = $1 AND shop_id = $2`, id, sc.ID); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 // ---------- Categories & partners ----------
 // Never hard-deleted: DELETE deactivates, so historical rows keep their FK.
 

@@ -36,10 +36,10 @@ write is safe to repeat:
 
 | Write | How replays stay safe |
 |---|---|
-| `POST …/expenses`, `POST …/handovers` | The client sends its own UUID as `id`. This is the idempotency key. Replaying it returns the stored row with `200` instead of `201`. If the id belongs to another shop you get `409`. |
+| `POST …/expenses`, `POST …/handovers`, `POST …/counts` | The client sends its own UUID as `id`. This is the idempotency key. Replaying it returns the stored row with `200` instead of `201`. If the id belongs to another shop you get `409`. |
 | `PUT …/revenue/{date}` | Upsert: there is exactly one row per shop per date |
 | `PUT …/{id}` | Full replacement, last write wins |
-| `DELETE …/expenses/{id}`, `DELETE …/handovers/{id}` | Always `204`, even if the row is already gone |
+| `DELETE …/expenses/{id}`, `DELETE …/handovers/{id}`, `DELETE …/counts/{id}` | Always `204`, even if the row is already gone |
 
 ## Auth
 
@@ -104,6 +104,19 @@ Same shape as expenses, with `partnerId` / `partnerName` in place of the categor
 | `POST /shops/{shopId}/handovers` | `{id?, date, amount, method?, partnerId, note?}` |
 | `PUT /shops/{shopId}/handovers/{id}` | `{date, amount, method?, partnerId, note?}` |
 | `DELETE /shops/{shopId}/handovers/{id}` | `204` |
+
+## Cash counts
+
+A log of physical cash counts ("I counted the drawer and found this much"). They're
+for your reference only and never change any total.
+`CashCount = {id, countedAt, amount, note}`, where `countedAt` is an RFC 3339 timestamp and `amount` is `>= 0`.
+
+| Method & path | Notes |
+|---|---|
+| `GET /shops/{shopId}/counts?limit=` | `{items: [CashCount]}`, newest first |
+| `POST /shops/{shopId}/counts` | `{id?, countedAt?, amount, note?}`. `countedAt` defaults to now |
+| `PUT /shops/{shopId}/counts/{id}` | `{countedAt, amount, note?}`. A missing `countedAt` resets it to now |
+| `DELETE /shops/{shopId}/counts/{id}` | `204` |
 
 ## Categories & partners
 

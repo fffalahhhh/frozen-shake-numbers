@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop } from './api'
+import { useFetch, type CashCount, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop } from './api'
 import { fromPaise, inr, isAmount, part, toPaise, todayIn, uuid, type Method } from './lib'
 import { enqueue, overlayOps } from './sync'
 import { DateField, MethodSeg, MoneyInput, Sheet, useConfirm, type SheetHandle } from './ui'
@@ -147,6 +147,71 @@ export function TxnSheet(props: TxnProps) {
         <div className="sheetActions">
           {item && <button type="button" className="btn danger" onClick={remove}><Trash2 size={17} /> Delete</button>}
           <button className="btn big">{item ? 'Save changes' : kind === 'expense' ? 'Add expense' : 'Record handover'}</button>
+        </div>
+      </form>
+    </Sheet>
+  )
+}
+
+// ponytail: datetime-local uses the device's timezone, assumed to match the shop's.
+const toLocalInput = (iso: string) => {
+  const d = new Date(iso)
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
+/** Log, edit or delete a physical cash count. `expected` (paise) is the app's cash in hand, shown for new counts. */
+export function CountSheet({ shop, item, expected, onClose }: { shop: Shop; item?: CashCount; expected?: number; onClose: () => void }) {
+  const sheet = useRef<SheetHandle>(null)
+  const confirm = useConfirm()
+  const [amount, setAmount] = useState(item ? String(Number(item.amount)) : '')
+  const [at, setAt] = useState(toLocalInput(item?.countedAt ?? new Date().toISOString()))
+  const [note, setNote] = useState(item?.note ?? '')
+  const [error, setError] = useState('')
+  const diff = expected !== undefined && isAmount(amount) ? toPaise(amount) - expected : null
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!isAmount(amount)) return setError('Enter the amount you counted, like 4200 or 4200.50')
+    if (!at) return setError('Choose when you counted')
+    const body = { countedAt: new Date(at).toISOString(), amount: amount.trim(), note: note.trim() }
+    enqueue(item
+      ? { shopId: shop.id, kind: 'count', action: 'update', targetId: item.id, body }
+      : { shopId: shop.id, kind: 'count', action: 'create', targetId: uuid(), body })
+    sheet.current?.dismiss()
+  }
+
+  const remove = async () => {
+    const ok = await confirm({ title: 'Delete this count?', message: 'Only the note of what you counted is removed. Cash in hand doesn’t change.', confirm: 'Delete Count' })
+    if (!ok || !item) return
+    enqueue({ shopId: shop.id, kind: 'count', action: 'delete', targetId: item.id })
+    sheet.current?.dismiss()
+  }
+
+  return (
+    <Sheet ref={sheet} open onClose={onClose} title={item ? 'Edit cash count' : 'Count cash'}>
+      <form onSubmit={submit}>
+        <label className="field">
+          <span>Cash counted</span>
+          <MoneyInput value={amount} onChange={setAmount} autoFocus={!item} label="Cash counted in rupees" />
+          {expected !== undefined && (
+            <p className="hint">
+              App says {inr(expected)} cash in hand
+              {diff === null ? '' : diff === 0 ? ' · Matches' : ` · ${inr(Math.abs(diff))} ${diff < 0 ? 'short' : 'extra'}`}
+            </p>
+          )}
+        </label>
+        <label className="field">
+          <span>Counted at</span>
+          <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} required />
+        </label>
+        <label className="field">
+          <span>Note <small style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</small></span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="For example, before closing" />
+        </label>
+        {error && <p className="formError">{error}</p>}
+        <div className="sheetActions">
+          {item && <button type="button" className="btn danger" onClick={remove}><Trash2 size={17} /> Delete</button>}
+          <button className="btn big">{item ? 'Save changes' : 'Save count'}</button>
         </div>
       </form>
     </Sheet>

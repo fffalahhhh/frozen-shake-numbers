@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react'
 import { api, ApiError } from './api'
 import { uuid } from './lib'
 
-export type Kind = 'revenue' | 'expense' | 'handover'
+export type Kind = 'revenue' | 'expense' | 'handover' | 'count'
 export type Op = {
   opId: string
   shopId: string
@@ -21,7 +21,7 @@ export type Op = {
 }
 
 const KEY = 'fs-sync-queue'
-const segment = { revenue: 'revenue', expense: 'expenses', handover: 'handovers' }
+const segment = { revenue: 'revenue', expense: 'expenses', handover: 'handovers', count: 'counts' }
 
 function load(): Op[] {
   try {

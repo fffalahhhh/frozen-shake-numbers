@@ -184,6 +184,11 @@ func (a *app) routes() http.Handler {
 	m.Handle("PUT /api/shops/{shopId}/handovers/{id}", a.shop(roleMember, a.updateTxn(handoverKind)))
 	m.Handle("DELETE /api/shops/{shopId}/handovers/{id}", a.shop(roleMember, a.deleteTxn(handoverKind)))
 
+	m.Handle("GET /api/shops/{shopId}/counts", a.shop(roleMember, a.listCounts))
+	m.Handle("POST /api/shops/{shopId}/counts", a.shop(roleMember, a.createCount))
+	m.Handle("PUT /api/shops/{shopId}/counts/{id}", a.shop(roleMember, a.updateCount))
+	m.Handle("DELETE /api/shops/{shopId}/counts/{id}", a.shop(roleMember, a.deleteCount))
+
 	m.Handle("GET /api/shops/{shopId}/history", a.shop(roleMember, a.history))
 	m.Handle("GET /api/shops/{shopId}/summary", a.shop(roleMember, a.summary))
 	m.Handle("GET /api/shops/{shopId}/export.pdf", a.shop(roleMember, a.exportPDF))

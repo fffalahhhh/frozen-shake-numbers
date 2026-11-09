@@ -1,20 +1,21 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { Banknote, CalendarClock, CirclePlus, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
-import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type StaffMember, type Totals } from '../api'
+import { Banknote, CalendarClock, CirclePlus, Coins, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
+import { useFetch, type CashCount, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type StaffMember, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
 import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, part, sumPart, toPaise, todayIn, type Method } from '../lib'
 import { Empty, MethodSeg, MethodTag, Skeleton, Status } from '../ui'
-import { RevenueSheet, TxnSheet } from '../sheets'
+import { CountSheet, RevenueSheet, TxnSheet } from '../sheets'
 
 const RECENT_REVENUE = 7
 const RECENT_EXPENSES = 10
+const RECENT_COUNTS = 5
 
 export const methodLabel = { '': '', cash: 'cash ', online: 'online ' }
 export const inHandLabel = { '': 'Total in hand', cash: 'Cash in hand', online: 'Online balance' }
 
-type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string; note?: string } } | { type: 'handover' }
+type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string; note?: string } } | { type: 'handover' } | { type: 'count'; item?: CashCount }
 
 /** "Today" / "Yesterday" / "Friday", plus the date. */
 export function dayLabel(date: string, today: string): [string, string] {
@@ -37,6 +38,7 @@ export default function Home() {
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
   const staff = useFetch<{ staff: StaffMember[] }>(`${base}/staff`)
   const summary = useFetch<{ summary: Totals; cash: Totals; online: Totals; since: string | null }>(`${base}/summary`)
+  const cnt = useFetch<{ items: CashCount[] }>(`${base}/counts?limit=${RECENT_COUNTS}`)
   const [monthStart, monthEnd] = monthBounds(today)
   const monthExp = useFetch<{ items: Expense[] }>(`${base}/expenses?from=${monthStart}&to=${monthEnd}`)
 
@@ -69,6 +71,9 @@ export default function Home() {
       .map((s) => ({ key: s.id, name: `${s.name} · salary`, amount: s.dueAmount!, day: s.dueDay!, prefill: { refId: salaries!.id, amount: s.dueAmount!, note: s.name } })),
   ].map((d) => ({ ...d, due: dayOfMonth(today, d.day) }))
     .sort((a, b) => a.due.localeCompare(b.due))
+  const counts = applyOps(cnt.data?.items ?? [], overlayOps(shop.id, 'count', cnt.loadedAt), () => true)
+    .sort((a, b) => b.countedAt.localeCompare(a.countedAt)).slice(0, RECENT_COUNTS)
+  const countTime = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: shop.timezone, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
   const since = summary.data?.since
   const offline = [rev, exp, summary].some((f) => f.error?.status === 0 && !f.data)
 
@@ -105,6 +110,7 @@ export default function Home() {
             <button className="action" onClick={() => setSheet({ type: 'revenue', date: today })}><i><TrendingUp size={21} strokeWidth={1.8} /></i>Add revenue</button>
             <button className="action" onClick={() => setSheet({ type: 'expense' })}><i><CirclePlus size={21} strokeWidth={1.8} /></i>Add expense</button>
             <button className="action" onClick={() => setSheet({ type: 'handover' })}><i><Forward size={21} strokeWidth={1.8} /></i>Hand over</button>
+            <button className="action" onClick={() => setSheet({ type: 'count' })}><i><Coins size={21} strokeWidth={1.8} /></i>Count cash</button>
           </div>
 
           {dues.length > 0 && (
@@ -124,6 +130,7 @@ export default function Home() {
               </div>
             </>
           )}
+
         </div>
 
         <div>
@@ -168,12 +175,33 @@ export default function Home() {
                 ))}
               </div>
             )}
+
+          {counts.length > 0 && (
+            <>
+              <div className="sectionHead"><h2>Cash counts</h2></div>
+              <div className="list">
+                {counts.map((c) => (
+                  <button className="row" key={c.id} onClick={() => setSheet({ type: 'count', item: c })}>
+                    <span className="iconTile soft"><Coins size={19} strokeWidth={1.7} /></span>
+                    <span className="rowCopy">
+                      <b>{countTime(c.countedAt)}<Status item={c} /></b>
+                      {c.note && <small>{c.note}</small>}
+                    </span>
+                    <span className="amount">{inr(toPaise(c.amount))}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {sheet?.type === 'revenue' && <RevenueSheet shop={shop} date={sheet.date} onClose={() => setSheet(null)} />}
       {sheet?.type === 'expense' && (
         <TxnSheet kind="expense" shop={shop} date={today} item={sheet.item} prefill={sheet.prefill} options={cats.data?.categories ?? []} onClose={() => setSheet(null)} />
+      )}
+      {sheet?.type === 'count' && (
+        <CountSheet shop={shop} item={sheet.item} expected={sheet.item || !summary.data ? undefined : toPaise(summary.data.cash.cashInHand)} onClose={() => setSheet(null)} />
       )}
       {sheet?.type === 'handover' && (
         <TxnSheet kind="handover" shop={shop} date={today} options={parts.data?.partners ?? []} onClose={() => setSheet(null)} />

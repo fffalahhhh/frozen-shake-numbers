@@ -50,7 +50,7 @@ function SyncStatus({ onReview }: { onReview: () => void }) {
 }
 
 function describe(op: Op): string {
-  const what = { revenue: 'Revenue', expense: 'Expense', handover: 'Handover' }[op.kind]
+  const what = { revenue: 'Revenue', expense: 'Expense', handover: 'Handover', count: 'Cash count' }[op.kind]
   const verb = { put: 'set', create: 'added', update: 'edited', delete: 'deleted' }[op.action]
   const amount = op.body?.amount ? ` ${inr(toPaise(op.body.amount))}` : ''
   const date = op.body?.date ?? (op.kind === 'revenue' ? op.targetId : '')

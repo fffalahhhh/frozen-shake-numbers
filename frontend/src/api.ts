@@ -12,6 +12,7 @@ export type Revenue = { date: string; amount: string; cash: string; online: stri
 type TxnBase = { id: string; date: string; amount: string; method?: Method; note: string; createdAt?: string; pending?: boolean; failed?: boolean }
 export type Expense = TxnBase & { categoryId: string; categoryName: string }
 export type Handover = TxnBase & { partnerId: string; partnerName: string }
+export type CashCount = { id: string; countedAt: string; amount: string; note: string; pending?: boolean; failed?: boolean }
 export type HistoryDay = { date: string; revenue: string; expenses: string; handovers: string; net: string; balance: string }
 export type Totals = { revenue: string; expenses: string; handovers: string; cashInHand: string }
 
