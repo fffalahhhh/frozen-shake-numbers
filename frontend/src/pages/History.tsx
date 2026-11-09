@@ -5,15 +5,25 @@ import {
   ChevronLeft,
   ChevronRight,
   FileDown,
+  ReceiptText,
 } from "lucide-react";
-import { useFetch, type HistoryDay, type Shop } from "../api";
+import {
+  useFetch,
+  type Category,
+  type Expense,
+  type HistoryDay,
+  type Shop,
+} from "../api";
 import { useSession } from "../session";
-import { useSync } from "../sync";
+import { applyOps, overlayOps, useSync } from "../sync";
 import {
   addMonths,
   fmtDate,
   inr,
   monthBounds,
+  newestFirst,
+  part,
+  sum,
   toPaise,
   todayIn,
   type Method,
@@ -22,11 +32,14 @@ import {
   DateField,
   Empty,
   MethodSeg,
+  MethodTag,
   PageHead,
   Sheet,
   Skeleton,
+  Status,
   type SheetHandle,
 } from "../ui";
+import { TxnSheet } from "../sheets";
 import { dayLabel, inHandLabel, methodLabel } from "./Today";
 
 type Totals = {
@@ -49,6 +62,7 @@ export default function History() {
   const [range, setRange] = useState({ from: thisMonth, to: today });
   const [method, setMethod] = useState<Method | "">("");
   const [exporting, setExporting] = useState(false);
+  const [view, setView] = useState<"days" | "expenses">("days");
 
   const [from, to] =
     mode === "all"
@@ -84,6 +98,25 @@ export default function History() {
         today={today}
       />
       <MethodSeg value={method} onChange={setMethod} all />
+      <div className="seg" role="tablist">
+        {(
+          [
+            ["days", "Days"],
+            ["expenses", "Expenses by day"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={view === k}
+            className={view === k ? "on" : ""}
+            onClick={() => setView(k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {data && days.length > 0 && (
         <div className="totals">
@@ -111,15 +144,23 @@ export default function History() {
 
       <div className="sectionHead">
         <p className="hint" style={{ margin: 0 }}>
-          {days.length} {days.length === 1 ? "day" : "days"} recorded · In hand
-          is the running balance
+          {view === "days" &&
+            `${days.length} ${days.length === 1 ? "day" : "days"} recorded · In hand is the running balance`}
         </p>
         <button className="link" onClick={() => setExporting(true)}>
           <FileDown size={15} style={{ verticalAlign: -3 }} /> Export PDF
         </button>
       </div>
 
-      {error && !data ? (
+      {view === "expenses" ? (
+        <ExpensesByDay
+          shop={shop}
+          from={from}
+          to={to}
+          method={method}
+          today={today}
+        />
+      ) : error && !data ? (
         <div className="banner danger">
           <span className="grow">
             {error.status === 0
@@ -202,6 +243,112 @@ export default function History() {
           today={today}
           initial={{ mode, month, range, method }}
           onClose={() => setExporting(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Only expenses, one card per day, newest day first. Tap an entry to edit it. */
+function ExpensesByDay({
+  shop,
+  from,
+  to,
+  method,
+  today,
+}: {
+  shop: Shop;
+  from: string;
+  to: string;
+  method: Method | "";
+  today: string;
+}) {
+  const [editing, setEditing] = useState<Expense | null>(null);
+  useSync();
+  const base = `/shops/${shop.id}`;
+  // ponytail: server caps a list at 499 rows; page by month if a period ever has more.
+  const exp = useFetch<{ items: Expense[] }>(
+    `${base}/expenses?from=${from}&to=${to}&limit=499${
+      method ? `&method=${method}` : ""
+    }`,
+  );
+  const cats = useFetch<{ categories: Category[] }>(`${base}/categories`);
+  const items = applyOps(
+    exp.data?.items ?? [],
+    overlayOps(shop.id, "expense", exp.loadedAt),
+    (e) => e.date >= from && e.date <= to && (!method || part(e, method) > 0),
+  ).sort(newestFirst);
+  const byDay = new Map<string, Expense[]>();
+  for (const e of items) byDay.set(e.date, [...(byDay.get(e.date) ?? []), e]);
+
+  if (exp.error && !exp.data)
+    return (
+      <div className="banner danger">
+        <span className="grow">
+          {exp.error.status === 0
+            ? "You’re offline and this period isn’t saved on this device yet."
+            : exp.error.message}
+        </span>
+        <button className="pill" onClick={exp.reload}>
+          Retry
+        </button>
+      </div>
+    );
+  if (exp.loading && !exp.data) return <Skeleton rows={4} />;
+  if (items.length === 0)
+    return (
+      <Empty
+        icon={ReceiptText}
+        title={`No ${methodLabel[method]}expenses in this period`}
+        text="Expenses you add on Home or on a day’s page will appear here, grouped by day."
+      />
+    );
+  return (
+    <>
+      <p className="hint">
+        {items.length} {items.length === 1 ? "expense" : "expenses"} over{" "}
+        {byDay.size} {byDay.size === 1 ? "day" : "days"} · {inr(sum(items))}
+      </p>
+      {[...byDay].map(([date, list]) => {
+        const [name, full] = dayLabel(date, today);
+        return (
+          <section key={date}>
+            <div className="sectionHead">
+              <h2>
+                {name}, {full}
+              </h2>
+              <span className="count">{list.length}</span>
+              <b className="dayTotal">−{inr(sum(list))}</b>
+            </div>
+            <div className="list">
+              {list.map((e) => (
+                <button className="row" key={e.id} onClick={() => setEditing(e)}>
+                  <span className="iconTile soft">
+                    <ReceiptText size={19} strokeWidth={1.7} />
+                  </span>
+                  <span className="rowCopy">
+                    <b>
+                      {e.categoryName}
+                      <MethodTag item={e} />
+                      <Status item={e} />
+                    </b>
+                    <small>{e.note || "No note"}</small>
+                  </span>
+                  <span className="amount">−{inr(toPaise(e.amount))}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+      {editing && (
+        <TxnSheet
+          kind="expense"
+          shop={shop}
+          date={editing.date}
+          item={editing}
+          options={cats.data?.categories ?? []}
+          onClose={() => setEditing(null)}
         />
       )}
     </>
