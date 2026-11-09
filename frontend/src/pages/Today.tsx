@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Banknote, CalendarClock, CirclePlus, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
-import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type Totals } from '../api'
+import { useFetch, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type StaffMember, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
 import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, part, sumPart, toPaise, todayIn, type Method } from '../lib'
@@ -14,7 +14,7 @@ const RECENT_EXPENSES = 10
 export const methodLabel = { '': '', cash: 'cash ', online: 'online ' }
 export const inHandLabel = { '': 'Total in hand', cash: 'Cash in hand', online: 'Online balance' }
 
-type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string } } | { type: 'handover' }
+type SheetState = null | { type: 'revenue'; date: string } | { type: 'expense'; item?: Expense; prefill?: { refId: string; amount: string; note?: string } } | { type: 'handover' }
 
 /** "Today" / "Yesterday" / "Friday", plus the date. */
 export function dayLabel(date: string, today: string): [string, string] {
@@ -35,6 +35,7 @@ export default function Home() {
   const ho = useFetch<{ items: Handover[] }>(`${base}/handovers?limit=10`) // only to reflect unsynced handovers in the totals
   const cats = useFetch<{ categories: Category[] }>(`${base}/categories`)
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
+  const staff = useFetch<{ staff: StaffMember[] }>(`${base}/staff`)
   const summary = useFetch<{ summary: Totals; cash: Totals; online: Totals; since: string | null }>(`${base}/summary`)
   const [monthStart, monthEnd] = monthBounds(today)
   const monthExp = useFetch<{ items: Expense[] }>(`${base}/expenses?from=${monthStart}&to=${monthEnd}`)
@@ -51,12 +52,22 @@ export default function Home() {
   const allHandovers = toPaise(all?.handovers) + sumPart(handovers, tab) - sumPart(ho.data?.items ?? [], tab)
   const cash = allRevenue - allExpenses - allHandovers
 
-  // A monthly due is paid once any expense in its category is dated this month.
-  const paid = new Set(applyOps(monthExp.data?.items ?? [], overlayOps(shop.id, 'expense', monthExp.loadedAt),
-    (e) => e.date >= monthStart && e.date <= monthEnd).map((e) => e.categoryId))
-  const dues = !monthExp.data ? [] : (cats.data?.categories ?? [])
-    .filter((c) => c.active && c.dueDay && c.dueAmount && !paid.has(c.id))
-    .map((c) => ({ ...c, due: dayOfMonth(today, c.dueDay!) }))
+  // A monthly due is paid once any expense in its category is dated this month;
+  // a salary once a Salaries expense notes the staff member's name.
+  const monthItems = applyOps(monthExp.data?.items ?? [], overlayOps(shop.id, 'expense', monthExp.loadedAt),
+    (e) => e.date >= monthStart && e.date <= monthEnd)
+  const paid = new Set(monthItems.map((e) => e.categoryId))
+  const salaries = cats.data?.categories.find((c) => c.active && /salar/i.test(c.name))
+  // ponytail: name match in the note, so "Ali" is also paid by "Alisha"; link expenses to staff if that bites.
+  const salaryPaid = (s: StaffMember) => monthItems.some((e) => e.categoryId === salaries?.id && e.note.toLowerCase().includes(s.name.toLowerCase()))
+  const dues = !monthExp.data ? [] : [
+    ...(cats.data?.categories ?? [])
+      .filter((c) => c.active && c.dueDay && c.dueAmount && !paid.has(c.id))
+      .map((c) => ({ key: c.id, name: c.name, amount: c.dueAmount!, day: c.dueDay!, prefill: { refId: c.id, amount: c.dueAmount! } })),
+    ...(salaries ? staff.data?.staff ?? [] : [])
+      .filter((s) => s.active && s.dueDay && s.dueAmount && !salaryPaid(s))
+      .map((s) => ({ key: s.id, name: `${s.name} · salary`, amount: s.dueAmount!, day: s.dueDay!, prefill: { refId: salaries!.id, amount: s.dueAmount!, note: s.name } })),
+  ].map((d) => ({ ...d, due: dayOfMonth(today, d.day) }))
     .sort((a, b) => a.due.localeCompare(b.due))
   const since = summary.data?.since
   const offline = [rev, exp, summary].some((f) => f.error?.status === 0 && !f.data)
@@ -101,13 +112,13 @@ export default function Home() {
               <div className="sectionHead"><h2>Dues this month</h2><span className="count">{dues.length}</span></div>
               <div className="list">
                 {dues.map((c) => (
-                  <button className="row" key={c.id} onClick={() => setSheet({ type: 'expense', prefill: { refId: c.id, amount: c.dueAmount! } })}>
+                  <button className="row" key={c.key} onClick={() => setSheet({ type: 'expense', prefill: c.prefill })}>
                     <span className="iconTile warm"><CalendarClock size={19} strokeWidth={1.7} /></span>
                     <span className="rowCopy">
                       <b>{c.name}{c.due < today && <span className="chip danger">Overdue</span>}</b>
                       <small>{c.due === today ? 'Due today' : `Due ${fmtDate(c.due, { weekday: 'short', day: 'numeric', month: 'short' })}`} · Tap to pay</small>
                     </span>
-                    <span className="amount">{inr(toPaise(c.dueAmount))}</span>
+                    <span className="amount">{inr(toPaise(c.amount))}</span>
                   </button>
                 ))}
               </div>

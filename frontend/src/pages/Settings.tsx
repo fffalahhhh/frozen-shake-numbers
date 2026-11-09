@@ -16,6 +16,7 @@ export default function Settings() {
   const parts = useFetch<{ partners: Partner[] }>(`${base}/partners`)
   const staff = useFetch<{ staff: StaffMember[] }>(`${base}/staff`)
   const [due, setDue] = useState<Category | null>(null)
+  const [salary, setSalary] = useState<StaffMember | null>(null)
   return (
     <>
       <PageHead eyebrow="Make it yours" title="Settings" sub="Shop details, expense categories, partners and staff." />
@@ -42,7 +43,11 @@ export default function Settings() {
           <NamedList
             title="Staff" addLabel="Add staff" placeholder="Staff name"
             items={staff.data?.staff} path={`${base}/staff`} reload={staff.reload}
-            sub={() => 'Available unless on leave'}
+            sub={(s) => {
+              const { dueAmount, dueDay } = s as StaffMember
+              return dueAmount ? `${inr(toPaise(dueAmount))} salary on day ${dueDay} monthly` : 'Available unless on leave'
+            }}
+            extra={(s) => s.active && <button className="pill" onClick={() => setSalary(s as StaffMember)}>Salary</button>}
             hideLabel="Deactivate" showLabel="Reactivate" hiddenTitle="Former staff"
             hideNote="Record leaves on the Staff tab. Past leaves stay on record after deactivating."
           />
@@ -53,20 +58,29 @@ export default function Settings() {
           <AppSection />
         </div>
       </div>
-      {due && <DueSheet cat={due} path={`${base}/categories`} onSaved={cats.reload} onClose={() => setDue(null)} />}
+      {due && (
+        <DueSheet item={due} path={`${base}/categories/${due.id}/due`} onSaved={cats.reload} onClose={() => setDue(null)}
+          title="monthly due" noun="due" hint={`Shows on Home until an expense in ${due.name} is added that month.`} />
+      )}
+      {salary && (
+        <DueSheet item={salary} path={`${base}/staff/${salary.id}/salary`} onSaved={staff.reload} onClose={() => setSalary(null)}
+          title="salary" noun="salary" hint={`Shows on Home until a Salaries expense noting ${salary.name} is added that month.`} />
+      )}
     </>
   )
 }
 
-/** Set or remove a category's monthly due (rent, electricity...). It shows on Home until paid. */
-function DueSheet({ cat, path, onSaved, onClose }: { cat: Category; path: string; onSaved: () => void; onClose: () => void }) {
+/** Set or remove a monthly due (rent, electricity, a staff salary...). It shows on Home until paid. */
+function DueSheet({ item: cat, path, onSaved, onClose, title, noun, hint }: {
+  item: Category | StaffMember; path: string; onSaved: () => void; onClose: () => void; title: string; noun: string; hint: string
+}) {
   const sheet = useRef<SheetHandle>(null)
   const [amount, setAmount] = useState(cat.dueAmount ? String(Number(cat.dueAmount)) : '')
   const [day, setDay] = useState(cat.dueDay ?? 1)
   const [error, setError] = useState('')
   const save = async (body: unknown) => {
     try {
-      await api(`${path}/${cat.id}/due`, 'PUT', body)
+      await api(path, 'PUT', body)
       onSaved()
       sheet.current?.dismiss()
     } catch (e) {
@@ -79,23 +93,23 @@ function DueSheet({ cat, path, onSaved, onClose }: { cat: Category; path: string
     save({ amount: amount.trim(), day })
   }
   return (
-    <Sheet ref={sheet} open onClose={onClose} title={`${cat.name} · monthly due`}>
+    <Sheet ref={sheet} open onClose={onClose} title={`${cat.name} · ${title}`}>
       <form onSubmit={submit}>
         <label className="field">
           <span>Amount</span>
           <MoneyInput value={amount} onChange={setAmount} autoFocus />
         </label>
         <label className="field">
-          <span>Due every month on day</span>
+          <span>{noun === 'salary' ? 'Paid' : 'Due'} every month on day</span>
           <select className="select" value={day} onChange={(e) => setDay(Number(e.target.value))}>
             {Array.from({ length: 31 }, (_, i) => <option key={i + 1}>{i + 1}</option>)}
           </select>
-          <p className="hint">Shows on Home until an expense in {cat.name} is added that month. Days past the month’s end fall on its last day.</p>
+          <p className="hint">{hint} Days past the month’s end fall on its last day.</p>
         </label>
         {error && <p className="formError">{error}</p>}
         <div className="sheetActions">
-          {cat.dueDay && <button type="button" className="btn danger" onClick={() => save({ amount: null })}>Remove due</button>}
-          <button className="btn big">Save due</button>
+          {cat.dueDay && <button type="button" className="btn danger" onClick={() => save({ amount: null })}>Remove {noun}</button>}
+          <button className="btn big">Save {noun}</button>
         </div>
       </form>
     </Sheet>

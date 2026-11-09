@@ -5,7 +5,7 @@ import type { Method } from './lib'
 export type User = { id: string; email: string; name: string; defaultShopId: string | null }
 export type Shop = { id: string; name: string; address: string; timezone: string; role: 'owner' | 'member'; isDefault: boolean }
 export type Category = { id: string; name: string; isDefault: boolean; active: boolean; dueAmount: string | null; dueDay: number | null }
-export type StaffMember = { id: string; name: string; active: boolean }
+export type StaffMember = { id: string; name: string; active: boolean; dueAmount: string | null; dueDay: number | null }
 export type Leave = { staffId: string; date: string; note: string }
 export type Partner = { id: string; name: string; active: boolean; totalHandedOver: string; handoverCount: number }
 export type Revenue = { date: string; amount: string; cash: string; online: string; pending?: boolean; failed?: boolean }

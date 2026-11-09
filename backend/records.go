@@ -299,55 +299,60 @@ func (a *app) listCategories(w http.ResponseWriter, r *http.Request, sc shopCtx)
 	return writeJSON(w, http.StatusOK, map[string]any{"categories": out})
 }
 
-// putDue sets a category's monthly due ({amount, day}) or clears it ({amount: null}).
-func (a *app) putDue(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
-	id, err := pathID(r, "id")
-	if err != nil {
-		return err
-	}
-	var in struct {
-		Amount *Money
-		Day    *int
-	}
-	if err := decode(w, r, &in); err != nil {
-		return err
-	}
-	var amount any // nil clears the due
-	if in.Amount != nil {
-		if in.Amount.IsZero() {
-			return invalid("Amount must be more than ₹0")
+// putDue sets a category's monthly due or a staff member's salary ({amount, day}),
+// or clears it ({amount: null}).
+func (a *app) putDue(table string) func(http.ResponseWriter, *http.Request, shopCtx) error {
+	return func(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+		id, err := pathID(r, "id")
+		if err != nil {
+			return err
 		}
-		if in.Day == nil || *in.Day < 1 || *in.Day > 31 {
-			return invalid("Due day must be 1–31")
+		var in struct {
+			Amount *Money
+			Day    *int
 		}
-		amount = string(*in.Amount)
-	} else {
-		in.Day = nil
+		if err := decode(w, r, &in); err != nil {
+			return err
+		}
+		var amount any // nil clears the due
+		if in.Amount != nil {
+			if in.Amount.IsZero() {
+				return invalid("Amount must be more than ₹0")
+			}
+			if in.Day == nil || *in.Day < 1 || *in.Day > 31 {
+				return invalid("Due day must be 1–31")
+			}
+			amount = string(*in.Amount)
+		} else {
+			in.Day = nil
+		}
+		tag, err := a.db.Exec(r.Context(), `UPDATE `+table+` SET due_amount = $3, due_day = $4 WHERE id = $1 AND shop_id = $2`,
+			id, sc.ID, amount, in.Day)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return errNotFound
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
 	}
-	tag, err := a.db.Exec(r.Context(), `UPDATE expense_categories SET due_amount = $3, due_day = $4 WHERE id = $1 AND shop_id = $2`,
-		id, sc.ID, amount, in.Day)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errNotFound
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
 }
 
 // ---------- Staff leave ----------
 // Staff are available by default; a row in staff_leaves marks one day off.
 
 func (a *app) listStaff(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
-	rows, err := a.db.Query(r.Context(), `SELECT id, name, active FROM staff WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
+	rows, err := a.db.Query(r.Context(), `SELECT id, name, active, due_amount::text, due_day FROM staff WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
 	if err != nil {
 		return err
 	}
 	type staff struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Active bool   `json:"active"`
+		ID        string  `json:"id"`
+		Name      string  `json:"name"`
+		Active    bool    `json:"active"`
+		DueAmount *string `json:"dueAmount"`
+		DueDay    *int32  `json:"dueDay"`
 	}
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[staff])
 	if err != nil {

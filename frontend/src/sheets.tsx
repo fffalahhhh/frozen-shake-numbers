@@ -67,7 +67,7 @@ type TxnProps = {
   shop: Shop
   date: string
   onClose: () => void
-  prefill?: { refId: string; amount: string }
+  prefill?: { refId: string; amount: string; note?: string }
 } & (
   | { kind: 'expense'; item?: Expense; options: Category[] }
   | { kind: 'handover'; item?: Handover; options: Partner[] }
@@ -85,7 +85,7 @@ export function TxnSheet(props: TxnProps) {
   const [refId, setRefId] = useState(currentRef || props.prefill?.refId || (kind === 'handover' ? '' : choices[0]?.id ?? ''))
   const [amount, setAmount] = useState(item ? String(Number(item.amount)) : props.prefill ? String(Number(props.prefill.amount)) : '')
   const [method, setMethod] = useState<Method>(item?.method ?? 'cash')
-  const [note, setNote] = useState(item?.note ?? '')
+  const [note, setNote] = useState(item?.note ?? props.prefill?.note ?? '')
   const [date, setDate] = useState(item?.date ?? props.date)
   const [error, setError] = useState('')
   const label = kind === 'expense' ? 'Category' : 'Partner'

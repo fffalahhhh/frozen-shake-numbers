@@ -281,6 +281,10 @@ func TestDuesAndLeaves(t *testing.T) {
 	}
 
 	staff := c.must(201, "POST", base+"/staff", map[string]any{"name": "Ravi"})["id"].(string)
+	c.must(204, "PUT", base+"/staff/"+staff+"/salary", map[string]any{"amount": "12000", "day": 1})
+	if got := c.must(200, "GET", base+"/staff", nil)["staff"].([]any)[0].(map[string]any); got["dueAmount"] != "12000.00" || got["dueDay"] != float64(1) {
+		t.Errorf("salary not saved: %v", got)
+	}
 	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-10-20", map[string]any{"note": "Sick"})
 	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-10-20", map[string]any{}) // retry: no duplicate
 	c.must(204, "PUT", base+"/staff/"+staff+"/leaves/2026-11-02", map[string]any{})
@@ -297,6 +301,7 @@ func TestDuesAndLeaves(t *testing.T) {
 	bShop, _, _ := bob.signup("bob-staff@example.com")
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/leaves/2026-10-21", map[string]any{})
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/categories/"+cat+"/due", map[string]any{"amount": "1", "day": 1})
+	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/salary", map[string]any{"amount": "1", "day": 1})
 }
 
 func TestExportPDF(t *testing.T) {

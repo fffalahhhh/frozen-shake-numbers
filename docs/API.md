@@ -129,10 +129,11 @@ use the same add / rename / deactivate endpoints as partners.
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/staff` | `{staff: [{id, name, active}]}` |
+| `GET /shops/{shopId}/staff` | `{staff: [{id, name, active, dueAmount, dueDay}]}` |
 | `POST /shops/{shopId}/staff` | `{name}` |
 | `PUT /shops/{shopId}/staff/{id}` | `{name?, active?}` |
 | `DELETE /shops/{shopId}/staff/{id}` | Deactivate |
+| `PUT /shops/{shopId}/staff/{id}/salary` | `{amount, day}` sets a monthly salary; `{amount: null}` clears it. Home counts it paid once a Salaries expense whose note includes their name is dated in the current month |
 | `GET /shops/{shopId}/leaves?from=&to=` | `{leaves: [{staffId, date, note}]}`, newest first |
 | `PUT /shops/{shopId}/staff/{id}/leaves/{date}` | `{note?}`. Marks one day off; upsert, safe to retry |
 | `DELETE /shops/{shopId}/staff/{id}/leaves/{date}` | Back to available. Idempotent |
