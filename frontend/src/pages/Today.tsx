@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Banknote, CalendarClock, CirclePlus, Coins, Forward, ReceiptText, TrendingUp, Wallet } from 'lucide-react'
-import { useFetch, type CashCount, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type StaffMember, type Totals } from '../api'
+import { api, ApiError, useFetch, type CashCount, type Category, type Expense, type Handover, type Partner, type Revenue, type Shop, type StaffMember, type Totals } from '../api'
 import { useSession } from '../session'
 import { applyOps, applyRevenueOps, overlayOps, useSync } from '../sync'
 import { addDays, dayOfMonth, fmtDate, inr, monthBounds, newestFirst, part, sumPart, toPaise, todayIn, type Method } from '../lib'
-import { Empty, MethodSeg, MethodTag, Skeleton, Status } from '../ui'
+import { Empty, MethodSeg, MethodTag, Skeleton, Status, useConfirm } from '../ui'
 import { countDiff, CountSheet, RevenueSheet, TxnSheet } from '../sheets'
 
 const RECENT_REVENUE = 7
@@ -28,6 +28,7 @@ export default function Home() {
   const today = todayIn(shop.timezone)
   const [sheet, setSheet] = useState<SheetState>(null)
   const [tab, setTab] = useState<Method | ''>('')
+  const confirm = useConfirm()
   useSync() // re-render when queued changes come and go
 
   const base = `/shops/${shop.id}`
@@ -62,13 +63,23 @@ export default function Home() {
   const salaries = cats.data?.categories.find((c) => c.active && /salar/i.test(c.name))
   // ponytail: name match in the note, so "Ali" is also paid by "Alisha"; link expenses to staff if that bites.
   const salaryPaid = (s: StaffMember) => monthItems.some((e) => e.categoryId === salaries?.id && e.note.toLowerCase().includes(s.name.toLowerCase()))
+  const ignore = async (d: { name: string; ignorePath: string }) => {
+    if (!await confirm({ title: `Ignore ${d.name}?`, message: 'It won’t show on Home again until next month, on any device.', confirm: 'Ignore this month' })) return
+    try {
+      await api(d.ignorePath, 'PUT', { month: monthStart })
+      cats.reload()
+      staff.reload()
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : 'Couldn’t ignore it. Check your connection and try again.')
+    }
+  }
   const dues = !monthExp.data ? [] : [
     ...(cats.data?.categories ?? [])
-      .filter((c) => c.active && c.dueDay && c.dueAmount && !paid.has(c.id))
-      .map((c) => ({ key: c.id, name: c.name, amount: c.dueAmount!, day: c.dueDay!, prefill: { refId: c.id, amount: c.dueAmount! } })),
+      .filter((c) => c.active && c.dueDay && c.dueAmount && !paid.has(c.id) && c.dueIgnored !== monthStart)
+      .map((c) => ({ key: c.id, ignorePath: `${base}/categories/${c.id}/due/ignore`, name: c.name, amount: c.dueAmount!, day: c.dueDay!, prefill: { refId: c.id, amount: c.dueAmount! } })),
     ...(salaries ? staff.data?.staff ?? [] : [])
-      .filter((s) => s.active && s.dueDay && s.dueAmount && !salaryPaid(s))
-      .map((s) => ({ key: s.id, name: `${s.name} · salary`, amount: s.dueAmount!, day: s.dueDay!, prefill: { refId: salaries!.id, amount: s.dueAmount!, note: s.name } })),
+      .filter((s) => s.active && s.dueDay && s.dueAmount && !salaryPaid(s) && s.dueIgnored !== monthStart)
+      .map((s) => ({ key: s.id, ignorePath: `${base}/staff/${s.id}/salary/ignore`, name: `${s.name} · salary`, amount: s.dueAmount!, day: s.dueDay!, prefill: { refId: salaries!.id, amount: s.dueAmount!, note: s.name } })),
   ].map((d) => ({ ...d, due: dayOfMonth(today, d.day) }))
     .sort((a, b) => a.due.localeCompare(b.due))
   const counts = applyOps(cnt.data?.items ?? [], overlayOps(shop.id, 'count', cnt.loadedAt), () => true)
@@ -118,14 +129,16 @@ export default function Home() {
               <div className="sectionHead"><h2>Dues this month</h2><span className="count">{dues.length}</span></div>
               <div className="list">
                 {dues.map((c) => (
-                  <button className="row" key={c.key} onClick={() => setSheet({ type: 'expense', prefill: c.prefill })}>
+                  <div className="row" role="button" tabIndex={0} key={c.key} onClick={() => setSheet({ type: 'expense', prefill: c.prefill })}
+                    onKeyDown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSheet({ type: 'expense', prefill: c.prefill }))}>
                     <span className="iconTile warm"><CalendarClock size={19} strokeWidth={1.7} /></span>
                     <span className="rowCopy">
                       <b>{c.name}{c.due < today && <span className="chip danger">Overdue</span>}</b>
                       <small>{c.due === today ? 'Due today' : `Due ${fmtDate(c.due, { weekday: 'short', day: 'numeric', month: 'short' })}`} · Tap to pay</small>
                     </span>
                     <span className="amount">{inr(toPaise(c.amount))}</span>
-                  </button>
+                    <button className="pill" onClick={(e) => { e.stopPropagation(); ignore(c) }}>Ignore</button>
+                  </div>
                 ))}
               </div>
             </>

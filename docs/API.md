@@ -125,11 +125,12 @@ historical records keep a valid reference.
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/categories` | `{categories: [{id, name, isDefault, active, dueAmount, dueDay}]}` |
+| `GET /shops/{shopId}/categories` | `{categories: [{id, name, isDefault, active, dueAmount, dueDay, dueIgnored}]}` |
 | `POST /shops/{shopId}/categories` | `{name}`. Names are unique per shop, ignoring case |
 | `PUT /shops/{shopId}/categories/{id}` | `{name?, active?}`: rename, hide or show |
 | `DELETE /shops/{shopId}/categories/{id}` | Hide (`active=false`) |
 | `PUT /shops/{shopId}/categories/{id}/due` | `{amount, day}` sets a monthly due (rent, bills); `{amount: null}` clears it. A due counts as paid once an expense in that category is dated in the current month |
+| `PUT /shops/{shopId}/categories/{id}/due/ignore` | `{month: "YYYY-MM-DD"}` hides the due on Home for that month (stored as `dueIgnored`, the month's first day); `{month: null}` un-hides it |
 | `GET /shops/{shopId}/partners?from=&to=` | `{partners: [{id, name, active, totalHandedOver, handoverCount}]}`. The totals respect the date range |
 | `POST /shops/{shopId}/partners` | `{name}` |
 | `PUT /shops/{shopId}/partners/{id}` | `{name?, active?}` |
@@ -142,11 +143,12 @@ use the same add / rename / deactivate endpoints as partners.
 
 | Method & path | Notes |
 |---|---|
-| `GET /shops/{shopId}/staff` | `{staff: [{id, name, active, dueAmount, dueDay}]}` |
+| `GET /shops/{shopId}/staff` | `{staff: [{id, name, active, dueAmount, dueDay, dueIgnored}]}` |
 | `POST /shops/{shopId}/staff` | `{name}` |
 | `PUT /shops/{shopId}/staff/{id}` | `{name?, active?}` |
 | `DELETE /shops/{shopId}/staff/{id}` | Deactivate |
 | `PUT /shops/{shopId}/staff/{id}/salary` | `{amount, day}` sets a monthly salary; `{amount: null}` clears it. Home counts it paid once a Salaries expense whose note includes their name is dated in the current month |
+| `PUT /shops/{shopId}/staff/{id}/salary/ignore` | Same as the category ignore, for a salary |
 | `GET /shops/{shopId}/leaves?from=&to=` | `{leaves: [{staffId, date, note}]}`, newest first |
 | `PUT /shops/{shopId}/staff/{id}/leaves/{date}` | `{note?}`. Marks one day off; upsert, safe to retry |
 | `DELETE /shops/{shopId}/staff/{id}/leaves/{date}` | Back to available. Idempotent |

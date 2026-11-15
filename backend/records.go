@@ -411,18 +411,19 @@ func (a *app) deleteCount(w http.ResponseWriter, r *http.Request, sc shopCtx) er
 
 func (a *app) listCategories(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
 	rows, err := a.db.Query(r.Context(), `
-		SELECT id, name, is_default, active, due_amount::text, due_day FROM expense_categories
+		SELECT id, name, is_default, active, due_amount::text, due_day, due_ignored::text FROM expense_categories
 		WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
 	if err != nil {
 		return err
 	}
 	type cat struct {
-		ID        string  `json:"id"`
-		Name      string  `json:"name"`
-		IsDefault bool    `json:"isDefault"`
-		Active    bool    `json:"active"`
-		DueAmount *string `json:"dueAmount"`
-		DueDay    *int32  `json:"dueDay"`
+		ID         string  `json:"id"`
+		Name       string  `json:"name"`
+		IsDefault  bool    `json:"isDefault"`
+		Active     bool    `json:"active"`
+		DueAmount  *string `json:"dueAmount"`
+		DueDay     *int32  `json:"dueDay"`
+		DueIgnored *string `json:"dueIgnored"`
 	}
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[cat])
 	if err != nil {
@@ -471,20 +472,51 @@ func (a *app) putDue(table string) func(http.ResponseWriter, *http.Request, shop
 	}
 }
 
+// ignoreDue hides a due or salary on Home for one month ({month: "YYYY-MM-DD"},
+// stored as that month's first day), or un-hides it ({month: null}).
+func (a *app) ignoreDue(table string) func(http.ResponseWriter, *http.Request, shopCtx) error {
+	return func(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
+		id, err := pathID(r, "id")
+		if err != nil {
+			return err
+		}
+		var in struct{ Month *string }
+		if err := decode(w, r, &in); err != nil {
+			return err
+		}
+		if in.Month != nil {
+			if _, err := parseDate(*in.Month); err != nil {
+				return err
+			}
+		}
+		tag, err := a.db.Exec(r.Context(), `UPDATE `+table+` SET due_ignored = date_trunc('month', $3::date)::date WHERE id = $1 AND shop_id = $2`,
+			id, sc.ID, in.Month)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return errNotFound
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+}
+
 // ---------- Staff leave ----------
 // Staff are available by default; a row in staff_leaves marks one day off.
 
 func (a *app) listStaff(w http.ResponseWriter, r *http.Request, sc shopCtx) error {
-	rows, err := a.db.Query(r.Context(), `SELECT id, name, active, due_amount::text, due_day FROM staff WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
+	rows, err := a.db.Query(r.Context(), `SELECT id, name, active, due_amount::text, due_day, due_ignored::text FROM staff WHERE shop_id = $1 ORDER BY sort_order, created_at`, sc.ID)
 	if err != nil {
 		return err
 	}
 	type staff struct {
-		ID        string  `json:"id"`
-		Name      string  `json:"name"`
-		Active    bool    `json:"active"`
-		DueAmount *string `json:"dueAmount"`
-		DueDay    *int32  `json:"dueDay"`
+		ID         string  `json:"id"`
+		Name       string  `json:"name"`
+		Active     bool    `json:"active"`
+		DueAmount  *string `json:"dueAmount"`
+		DueDay     *int32  `json:"dueDay"`
+		DueIgnored *string `json:"dueIgnored"`
 	}
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[staff])
 	if err != nil {

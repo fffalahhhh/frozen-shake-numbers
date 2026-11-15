@@ -275,6 +275,15 @@ func TestDuesAndLeaves(t *testing.T) {
 	if got["dueAmount"] != "15000.00" || got["dueDay"] != float64(5) {
 		t.Errorf("due not saved: %v", got)
 	}
+	c.must(204, "PUT", base+"/categories/"+cat+"/due/ignore", map[string]any{"month": "2026-11-15"})
+	c.must(422, "PUT", base+"/categories/"+cat+"/due/ignore", map[string]any{"month": "nope"})
+	if got := c.must(200, "GET", base+"/categories", nil)["categories"].([]any)[0].(map[string]any); got["dueIgnored"] != "2026-11-01" {
+		t.Errorf("due not ignored: %v", got)
+	}
+	c.must(204, "PUT", base+"/categories/"+cat+"/due/ignore", map[string]any{"month": nil})
+	if got := c.must(200, "GET", base+"/categories", nil)["categories"].([]any)[0].(map[string]any); got["dueIgnored"] != nil {
+		t.Errorf("ignore not cleared: %v", got)
+	}
 	c.must(204, "PUT", base+"/categories/"+cat+"/due", map[string]any{"amount": nil})
 	if got := c.must(200, "GET", base+"/categories", nil)["categories"].([]any)[0].(map[string]any); got["dueDay"] != nil {
 		t.Errorf("due not cleared: %v", got)
@@ -302,6 +311,7 @@ func TestDuesAndLeaves(t *testing.T) {
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/leaves/2026-10-21", map[string]any{})
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/categories/"+cat+"/due", map[string]any{"amount": "1", "day": 1})
 	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/salary", map[string]any{"amount": "1", "day": 1})
+	bob.must(404, "PUT", "/api/shops/"+bShop+"/staff/"+staff+"/salary/ignore", map[string]any{"month": "2026-11-01"})
 }
 
 func TestCashCounts(t *testing.T) {
