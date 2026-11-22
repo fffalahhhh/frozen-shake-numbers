@@ -33,11 +33,14 @@ type config struct {
 	SMTPPass     string
 	SMTPFrom     string
 	StaticDir    string // built PWA to serve alongside the API (single-container deploys)
+	GoogleSAJSON string // service-account key for the Google Sheets mirror (sheets.go)
+	GoogleSheets string // "shopId=sheetURL,..."
 }
 
 type app struct {
-	db  *pgxpool.Pool
-	cfg config
+	db     *pgxpool.Pool
+	cfg    config
+	sheets *sheetSync // nil when the Sheets mirror isn't configured
 }
 
 func env(key, def string) string {
@@ -59,6 +62,8 @@ func loadConfig() config {
 		SMTPPass:     os.Getenv("SMTP_PASS"),
 		SMTPFrom:     env("SMTP_FROM", "Frozen Shake <no-reply@frozenshake.local>"),
 		StaticDir:    os.Getenv("STATIC_DIR"),
+		GoogleSAJSON: os.Getenv("GOOGLE_SA_JSON"),
+		GoogleSheets: os.Getenv("GOOGLE_SHEETS"),
 	}
 }
 
@@ -74,6 +79,12 @@ func main() {
 		log.Fatal("migrate: ", err)
 	}
 	a := &app{db: db, cfg: cfg}
+	if a.sheets, err = newSheetSync(cfg.GoogleSAJSON, cfg.GoogleSheets); err != nil {
+		log.Printf("sheets: disabled: %v", err) // a bad sheet setting must never stop the app
+	}
+	if a.sheets != nil {
+		go a.runSheetSync()
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           a.routes(),

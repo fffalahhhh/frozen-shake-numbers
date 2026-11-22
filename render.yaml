@@ -25,3 +25,7 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
+      - key: GOOGLE_SA_JSON # optional: Google Sheets mirror, service-account JSON key
+        sync: false
+      - key: GOOGLE_SHEETS # optional: shopId=sheetURL,shopId=sheetURL
+        sync: false

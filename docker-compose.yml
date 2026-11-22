@@ -24,6 +24,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-Frozen Shake <no-reply@frozenshake.local>}
+      GOOGLE_SA_JSON: ${GOOGLE_SA_JSON:-}
+      GOOGLE_SHEETS: ${GOOGLE_SHEETS:-}
     depends_on:
       db:
         condition: service_healthy

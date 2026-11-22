@@ -38,6 +38,12 @@ func TestINR(t *testing.T) {
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	_, srv := newTestApp(t)
+	return srv
+}
+
+func newTestApp(t *testing.T) (*app, *httptest.Server) {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL not set")
@@ -54,9 +60,10 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err := migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer((&app{db: db, cfg: config{AppURL: "http://test"}}).routes())
+	a := &app{db: db, cfg: config{AppURL: "http://test"}}
+	srv := httptest.NewServer(a.routes())
 	t.Cleanup(srv.Close)
-	return srv
+	return a, srv
 }
 
 type client struct {

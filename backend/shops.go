@@ -51,7 +51,11 @@ func (a *app) shop(min role, fn func(http.ResponseWriter, *http.Request, shopCtx
 		if min == roleOwner && sc.Role != "owner" {
 			return errForbidden
 		}
-		return fn(w, r, sc)
+		err = fn(w, r, sc)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			a.sheets.mark(id) // even on error: the write may have committed before the response failed
+		}
+		return err
 	})
 }
 

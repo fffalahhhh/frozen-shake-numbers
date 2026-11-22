@@ -73,6 +73,26 @@ cd frontend && npm test
 | `APP_URL` | `http://localhost:5173` | Public app URL, used in reset links |
 | `COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | – | Password-reset email |
+| `GOOGLE_SA_JSON`, `GOOGLE_SHEETS` | – | Google Sheets mirror, below |
+
+### Google Sheets mirror
+
+Each shop can have a Google Sheet that mirrors all of its data: a Summary tab
+(all-time totals, month by month, by category, by partner, salaries by staff),
+then Daily, Expenses, Salaries, Handovers, Staff, Leaves, Cash counts and
+Categories. About 15 seconds after any change, the API rebuilds the app's tabs
+from the database in one atomic update (`backend/sheets.go`). It's one-way:
+edits in those tabs are overwritten. Your own tabs are never touched.
+
+1. In Google Cloud: create a project, enable the **Google Sheets API**, create
+   a service account and download a JSON key for it.
+2. Set `GOOGLE_SA_JSON` to the key's contents.
+3. Share each shop's sheet with the service account's `client_email` as
+   **Editor**. The API also logs this email at startup.
+4. Set `GOOGLE_SHEETS=shopId=https://docs.google.com/spreadsheets/d/…,shopId=…`.
+   Open `/api/shops` while signed in to see your shop ids.
+
+Every linked shop syncs once at startup. Errors go to the API log.
 
 ## Production deployment
 
