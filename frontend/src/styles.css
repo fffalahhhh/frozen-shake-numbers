@@ -259,6 +259,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   border: 1px solid var(--border); background: var(--card); font-size: 16px;
 }
 .field textarea { min-height: 76px; resize: vertical; }
+/* iOS Safari sizes native date inputs to their content and ignores width: 100% */
+.field input[type="datetime-local"] { -webkit-appearance: none; appearance: none; display: block; min-width: 0; text-align: left; }
+.field input[type="datetime-local"]::-webkit-date-and-time-value { text-align: left; }
 .input:focus, .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
 .money { position: relative; }
 .money::before { content: '₹'; position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: 20px; color: var(--muted); }
