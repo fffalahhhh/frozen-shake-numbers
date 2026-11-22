@@ -3,9 +3,9 @@
 // - API GETs are network-first with a cache fallback, so previously loaded
 //   records stay viewable offline. Writes are never cached: the page queues
 //   them (src/sync.ts) and replays them when back online.
-const SHELL = 'fs-shell-v1'
+const SHELL = 'fs-shell-v2'
 const API = 'fs-api'
-const SHELL_URLS = ['/', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png']
+const SHELL_URLS = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
